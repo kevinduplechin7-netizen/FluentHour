@@ -1,102 +1,30 @@
-// src/App.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const APP_NAME = "FluentHour";
-const APP_SUBTITLE = "Guided speaking practice • local-first";
-const APP_TAGLINE =
-  "Three hundred plus hours of guided speaking practice to level up your fluency. Set your goal, start at your level, and follow the steps with a language helper.";
-
-
 /**
- * FluentHour
- * Vite + React + TypeScript, local-first.
- *
- * Two screens only:
- * - Home: "Start my fluent hour"
- * - Session: "Start / Pause" (autopause at phase end)
- *
- * Library:
- * - perfect-hour-data.txt must be available at /library/perfect-hour-data.txt (recommended: public/library/)
- * - Sessions are extracted only from BEGIN/END blocks (notes between sessions are ignored)
- *
- * Local storage:
- * - preferred level, partner mode, category bias, home mode
- * - recent template IDs per level (variety)
- * - completion (coverage) per template ID
- * - time tracking toward a goal
+ * FluentHour — premium, local-first
+ * Two screens: HOME + SESSION
+ * Library source: public/library/perfect-hour-data.txt (served at /library/perfect-hour-data.txt)
  */
 
 type Screen = "home" | "session";
-type PartnerMode = "human" | "ai";
-type HomeMode = "random" | "path";
 type CEFRLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
-
-const CEFR_LEVELS: CEFRLevel[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
-
-const LEVEL_EQUIV: Record<CEFRLevel, { actfl: string; clb: string; label: string }> = {
-  A1: { actfl: "Novice Low–Mid", clb: "CLB 1–2", label: "Beginner foundations" },
-  A2: { actfl: "Novice High–Intermediate Low", clb: "CLB 3–4", label: "Everyday survival" },
-  B1: { actfl: "Intermediate Mid–High", clb: "CLB 5–6", label: "Independent speaker" },
-  B2: { actfl: "Advanced Low–Mid", clb: "CLB 7–8", label: "Confident and flexible" },
-  C1: { actfl: "Advanced Mid–Superior", clb: "CLB 9–10", label: "Professional precision" },
-  C2: { actfl: "Superior–Distinguished", clb: "CLB 11–12", label: "Near-native range" },
-};
+type Mode = "random" | "path";
+type PartnerMode = "human" | "ai";
 
 type Category =
-  | "Daily life"
-  | "Travel"
-  | "Work"
-  | "Services"
-  | "Social"
-  | "Family"
-  | "Health"
-  | "Education"
-  | "Food"
-  | "Shopping"
-  | "Housing"
-  | "Transportation"
-  | "Government"
-  | "Faith"
-  | "Culture"
-  | "Technology"
-  | "Emergency"
-  | "Politeness"
-  | "Problem-solving"
-  | "Money"
-  | "Phone"
-  | "Ministry"
-  | "Relationships"
-  | "Admin";
-
-type CategoryBias = Category | "Any";
-
-const CATEGORY_OPTIONS: CategoryBias[] = [
-  "Any",
-  "Daily life",
-  "Travel",
-  "Work",
-  "Services",
-  "Social",
-  "Family",
-  "Health",
-  "Education",
-  "Food",
-  "Shopping",
-  "Housing",
-  "Transportation",
-  "Government",
-  "Faith",
-  "Culture",
-  "Technology",
-  "Politeness",
-  "Problem-solving",
-  "Money",
-  "Phone",
-  "Ministry",
-  "Relationships",
-  "Admin",
-  "Emergency",
-];
+  | "Everyday"
+  | "Travel & Transit"
+  | "Food & Ordering"
+  | "Housing & Errands"
+  | "Work & Professional"
+  | "Social & Relationships"
+  | "Health & Emergencies"
+  | "Culture & Politeness"
+  | "Problem Solving"
+  | "Paperwork & Admin"
+  | "Family & Kids"
+  | "Spiritual & Ministry"
+  | "Other";
 
 type Phase = {
   id: string;
@@ -108,8 +36,7 @@ type Phase = {
 };
 
 type Template = {
-  id: string; // prefer explicit ID: if present; otherwise stable fallback
-  source: "file" | "imported";
+  id: string;
   title: string;
   level: CEFRLevel;
   partner: "human" | "ai" | "either";
@@ -119,25 +46,17 @@ type Template = {
   category: Category;
   phases: Phase[];
   twists: string[];
+  source: "library" | "import";
 };
 
-type AppSettings = {
-  preferredLevel: CEFRLevel;
-  partnerMode: PartnerMode;
-  categoryBias: CategoryBias;
-  homeMode: HomeMode; // random vs path within the chosen level
-};
-
+type CompletionMap = Record<string, { completed: boolean; completedAt?: number }>;
 type RecentByLevel = Record<CEFRLevel, string[]>;
 
-type CompletionState = {
-  completedAtById: Record<string, number>; // coverage: first time only
-};
-
-type TimeState = {
+type Settings = {
+  preferredLevel: CEFRLevel;
+  partnerMode: PartnerMode;
+  mode: Mode;
   goalHours: number;
-  totalSeconds: number;
-  byLevelSeconds: Record<CEFRLevel, number>;
 };
 
 type SessionState = {
@@ -145,24 +64,40 @@ type SessionState = {
   phaseIndex: number;
   remainingSeconds: number;
   isRunning: boolean;
-  showHelper: boolean; // helper card is hidden while running
+  showHelper: boolean;
   banner?: string;
-  completedPhaseIds: string[]; // phase-level completion (within current run)
+  isFinished: boolean;
 };
 
-/* =========================
-   Storage keys
-========================= */
+const APP_NAME = "FluentHour";
+const APP_SUBTITLE = "Canadian benchmarks • calm structure";
+const APP_TAGLINE =
+  "Three hundred plus hours of guided speaking practice to level up your fluency. Set your goal, start at your level, and follow the steps with a language helper.";
 
-const LS_SETTINGS = "ph.settings.v2";
-const LS_RECENTS = "ph.recents.v1";
-const LS_IMPORTED = "ph.imported.v1";
-const LS_COMPLETION = "ph.completion.v1";
-const LS_TIME = "ph.time.v1";
+const LEVELS: CEFRLevel[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
-/* =========================
-   Small utilities
-========================= */
+const LEVEL_LABEL: Record<CEFRLevel, string> = {
+  A1: "Beginner foundations",
+  A2: "Everyday survival",
+  B1: "Independent speaker",
+  B2: "Confident and flexible",
+  C1: "Professional precision",
+  C2: "Near-native range",
+};
+
+const DEFAULT_CATEGORY: Category = "Everyday";
+
+const LS_SETTINGS = "fluentHour.settings.v2";
+const LS_RECENTS = "fluentHour.recents.v1";
+const LS_COMPLETIONS = "fluentHour.completions.v1";
+const LS_TIME = "fluentHour.time.v1";
+const LS_IMPORTS = "fluentHour.imports.v1";
+
+/* ----------------- helpers ----------------- */
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
 
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
@@ -173,1017 +108,786 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-function kvGet<T>(key: string, fallback: T): T {
-  return safeJsonParse<T>(localStorage.getItem(key), fallback);
-}
-
-function kvSet(key: string, value: any) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
-  }
-}
-
-function clampMinutes(mins: number) {
-  const n = Number.isFinite(mins) ? mins : 0;
-  return Math.max(0, Math.min(180, Math.round(n)));
-}
-
-function formatMMSS(totalSeconds: number) {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const mm = Math.floor(s / 60);
-  const ss = s % 60;
-  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-}
-
-function percent(done: number, total: number) {
-  if (!total) return 0;
-  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
-}
-
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
+function usePersistedState<T>(key: string, fallback: T) {
+  const [value, setValue] = useState<T>(() => safeJsonParse(localStorage.getItem(key), fallback));
+  useEffect(() => {
     try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.left = "-9999px";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      return ok;
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      return false;
+      // ignore
     }
-  }
+  }, [key, value]);
+  return [value, setValue] as const;
 }
-
-/* =========================
-   Library loading
-========================= */
-
-async function loadPerfectHourText(): Promise<string> {
-  // Recommended: put the file at public/library/perfect-hour-data.txt
-  // This prevents SPA fallback from returning index.html.
-  const primary = "/library/perfect-hour-data.txt";
-
-  const tryFetch = async (url: string) => {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Could not load library (${res.status})`);
-    return await res.text();
-  };
-
-  // Attempt: public path
-  try {
-    const raw = await tryFetch(primary);
-    // If the host is serving SPA fallback HTML here, force a fallback attempt.
-    if (looksLikeHtml(raw) && !raw.toUpperCase().includes("BEGIN PERFECT HOUR SESSION")) {
-      throw new Error("SPA fallback");
-    }
-    return raw;
-  } catch {
-    // Fallback: relative to module (works in some dev setups when file is kept in src/library)
-    const url = new URL("./library/perfect-hour-data.txt", import.meta.url);
-    const raw = await tryFetch(url.toString());
-    return raw;
-  }
-}
-
-function looksLikeHtml(raw: string) {
-  const s = (raw ?? "").trim().toLowerCase();
-  return s.startsWith("<!doctype") || s.startsWith("<html") || s.includes("<head") || s.includes("<body");
-}
-
-/* =========================
-   Parser
-========================= */
-
-function normalizeLine(line: string) {
-  return (line ?? "").replace(/\r/g, "").trim();
-}
-
-function extractSessionBlocks(raw: string): string[] {
-  const text = raw || "";
-  const re = /BEGIN PERFECT HOUR SESSION[\s\S]*?END PERFECT HOUR SESSION/gim;
-  const matches = text.match(re);
-  return matches ? matches.map((m) => m.trim()) : [];
-}
-
-function tryExtractCEFR(levelText: string | undefined, fallback: CEFRLevel): CEFRLevel {
-  const t = (levelText ?? "").toUpperCase();
-  const hit = CEFR_LEVELS.find((l) => t.includes(l));
-  return hit ?? fallback;
-}
-
-function inferCategoryFromContext(text: string): Category {
-  const s = (text ?? "").toLowerCase();
-  if (s.includes("doctor") || s.includes("medicine") || s.includes("clinic") || s.includes("pain")) return "Health";
-  if (s.includes("school") || s.includes("class") || s.includes("teacher") || s.includes("homework")) return "Education";
-  if (s.includes("restaurant") || s.includes("coffee") || s.includes("menu") || s.includes("eat") || s.includes("drink")) return "Food";
-  if (s.includes("hotel") || s.includes("airport") || s.includes("ticket") || s.includes("directions") || s.includes("bus") || s.includes("train"))
-    return "Travel";
-  if (s.includes("rent") || s.includes("apartment") || s.includes("house") || s.includes("landlord")) return "Housing";
-  if (s.includes("shopping") || s.includes("store") || s.includes("price") || s.includes("buy")) return "Shopping";
-  if (s.includes("job") || s.includes("boss") || s.includes("meeting") || s.includes("deadline")) return "Work";
-  if (s.includes("police") || s.includes("visa") || s.includes("office") || s.includes("documents")) return "Government";
-  if (s.includes("church") || s.includes("prayer") || s.includes("bible") || s.includes("mosque")) return "Faith";
-  if (s.includes("phone") || s.includes("app") || s.includes("wifi") || s.includes("computer")) return "Technology";
-  if (s.includes("help") || s.includes("emergency") || s.includes("fire") || s.includes("hurt") || s.includes("lost")) return "Emergency"
-  | "Politeness"
-  | "Problem-solving"
-  | "Money"
-  | "Phone"
-  | "Ministry"
-  | "Relationships"
-  | "Admin";
-  if (s.includes("family") || s.includes("child") || s.includes("parents") || s.includes("wife") || s.includes("husband")) return "Family";
-  if (s.includes("bank") || s.includes("post") || s.includes("service") || s.includes("counter")) return "Services";
-  if (s.includes("party") || s.includes("friend") || s.includes("meet") || s.includes("invite")) return "Social";
-  if (s.includes("bus") || s.includes("car") || s.includes("ride") || s.includes("traffic")) return "Transportation";
-  return "Daily life";
-}
-
-function stableId(parts: string[]) {
-  // Deterministic, short-ish ID for local-first usage when no explicit ID is provided
-  const str = parts.join("||").trim().toLowerCase();
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return `ph_${(h >>> 0).toString(16)}`;
-}
-
-function parseOneSessionBlock(block: string, fallbackLevel: CEFRLevel, source: Template["source"]): Template | null {
-  // Preprocess: ensure keys appear on separate lines (handles single-line headers)
-  let text = block || "";
-
-  // Put markers on their own lines (just in case)
-  text = text.replace(/BEGIN PERFECT HOUR SESSION/gi, "\nBEGIN PERFECT HOUR SESSION\n");
-  text = text.replace(/END PERFECT HOUR SESSION/gi, "\nEND PERFECT HOUR SESSION\n");
-
-  const keys = [
-    "ID:",
-    "Title:",
-    "Level:",
-    "Partner:",
-    "Goal (CLB):",
-    "Context:",
-    "Correction:",
-    "Category:",
-    "PHASE",
-    "Name:",
-    "Minutes:",
-    "Purpose:",
-    "Human steps:",
-    "AI helper script:",
-    "Twists:",
-  ];
-
-  for (const k of keys) {
-    const re = new RegExp(`\\s*${k.replace(/[()]/g, "\\$&")}`, "gi");
-    text = text.replace(re, `\n${k}`);
-  }
-
-  // Normalize human steps / helper script formatting
-  text = text.replace(/\nHuman steps:\s*\n/gi, "\nHuman steps:\n");
-  text = text.replace(/\nAI helper script:\s*\n/gi, "\nAI helper script:\n");
-
-  // Normalize a variety of PHASE headers into a line that starts with "PHASE"
-  // Examples:
-  // - PHASE 1
-  // - PHASE one
-  // - PHASE 1: Fluency loop (10m)
-  text = text.replace(/(\n|\r|^)\s*PHASE\s+([0-9]+|one|two|three|four|five|six|seven|eight|nine|ten)\b/gi, "\nPHASE");
-  text = text.replace(/(\n|\r|^)\s*PHASE\s*:/gi, "\nPHASE");
-
-  const lines = text
-    .split("\n")
-    .map(normalizeLine)
-    .filter((x) => x.length > 0 && x !== "BEGIN PERFECT HOUR SESSION" && x !== "END PERFECT HOUR SESSION");
-
-  let idLine = "";
-  let title = "";
-  let levelText = "";
-  let partnerText = "";
-  let goal = "";
-  let context = "";
-  let correction = "";
-  let category: Category | "" = "";
-
-  const phases: Phase[] = [];
-  const twists: string[] = [];
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.toLowerCase().startsWith("id:")) {
-      idLine = line.slice(3).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("title:")) {
-      title = line.slice(6).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("level:")) {
-      levelText = line.slice(6).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("partner:")) {
-      partnerText = line.slice(8).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("goal (clb):")) {
-      goal = line.slice("Goal (CLB):".length).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("context:")) {
-      context = line.slice(8).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("correction:")) {
-      correction = line.slice(11).trim();
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("category:")) {
-      const rawCat = line.slice(9).trim();
-      category = (rawCat as any) || "";
-      i++;
-      continue;
-    }
-
-    if (line.toUpperCase().startsWith("PHASE")) {
-      // Parse one phase block
-      let phTitle = "";
-      let minutes = 0;
-      let purpose = "";
-      const learnerSteps: string[] = [];
-      let helperScript = "";
-
-      // Read until next PHASE or Twists or end
-      i++;
-      while (i < lines.length) {
-        const l = lines[i];
-
-        if (l.toUpperCase().startsWith("PHASE") || l.toLowerCase().startsWith("twists:")) break;
-
-        if (l.toLowerCase().startsWith("name:")) {
-          phTitle = l.slice(5).trim();
-          i++;
-          continue;
-        }
-        if (l.toLowerCase().startsWith("minutes:")) {
-          const raw = l.slice(8).trim();
-          const n = parseInt(raw, 10);
-          minutes = Number.isFinite(n) ? n : 0;
-          i++;
-          continue;
-        }
-        if (l.toLowerCase().startsWith("purpose:")) {
-          purpose = l.slice(8).trim();
-          i++;
-          continue;
-        }
-
-        if (l.toLowerCase().startsWith("human steps:")) {
-          i++;
-          while (i < lines.length) {
-            const sLine = lines[i];
-            if (
-              sLine.toLowerCase().startsWith("ai helper script:") ||
-              sLine.toUpperCase().startsWith("PHASE") ||
-              sLine.toLowerCase().startsWith("twists:")
-            ) {
-              break;
-            }
-            // accept bullet points or plain lines
-            const cleaned = sLine.replace(/^\*\s*/, "").trim();
-            if (cleaned) learnerSteps.push(cleaned);
-            i++;
-          }
-          continue;
-        }
-
-        if (l.toLowerCase().startsWith("ai helper script:")) {
-          const first = l.slice("AI helper script:".length).trim();
-          const parts: string[] = [];
-          if (first) parts.push(first);
-          i++;
-          while (i < lines.length) {
-            const sLine = lines[i];
-            if (sLine.toUpperCase().startsWith("PHASE") || sLine.toLowerCase().startsWith("twists:")) break;
-            if (sLine.toLowerCase().startsWith("name:") || sLine.toLowerCase().startsWith("minutes:") || sLine.toLowerCase().startsWith("purpose:")) break;
-            if (sLine.toLowerCase().startsWith("human steps:") || sLine.toLowerCase().startsWith("ai helper script:")) break;
-            parts.push(sLine);
-            i++;
-          }
-          helperScript = parts.join(" ").trim();
-          continue;
-        }
-
-        i++;
-      }
-
-      const phId = stableId([title, levelText, phTitle, String(minutes)]);
-      phases.push({
-        id: phId,
-        title: phTitle || `Phase ${phases.length + 1}`,
-        minutes: clampMinutes(minutes || 0),
-        purpose: purpose || "",
-        learnerSteps,
-        helperScript: helperScript || "",
-      });
-      continue;
-    }
-
-    if (line.toLowerCase().startsWith("twists:")) {
-      i++;
-      while (i < lines.length) {
-        const tLine = lines[i];
-        if (tLine.toUpperCase().startsWith("PHASE")) break;
-        const cleaned = tLine.replace(/^\*\s*/, "").trim();
-        if (cleaned) twists.push(cleaned);
-        i++;
-      }
-      continue;
-    }
-
-    i++;
-  }
-
-  if (!title || !context || phases.length === 0) return null;
-
-  const level = tryExtractCEFR(levelText, fallbackLevel);
-  const partnerLower = (partnerText ?? "").toLowerCase();
-  const partner: Template["partner"] =
-    partnerLower.includes("either") || partnerLower.includes("human or ai") ? "either" : partnerLower.includes("ai") ? "ai" : "human";
-
-  const cat = (category && CATEGORY_OPTIONS.includes(category as any) ? (category as Category) : inferCategoryFromContext(`${title}\n${context}`)) as Category;
-
-  const explicitId = (idLine || "").trim();
-  const id = explicitId ? explicitId.toLowerCase() : stableId([source, level, title, context]).toLowerCase();
-
-  return {
-    id,
-    source,
-    title,
-    level,
-    partner,
-    goalCLB: goal || undefined,
-    context,
-    correction: correction || undefined,
-    category: cat,
-    phases,
-    twists,
-  };
-}
-
-function parsePerfectHourText(raw: string, fallbackLevel: CEFRLevel, source: Template["source"]): Template[] {
-  const blocks = extractSessionBlocks(raw);
-  const templates: Template[] = [];
-  for (const b of blocks) {
-    const t = parseOneSessionBlock(b, fallbackLevel, source);
-    if (t) templates.push(t);
-  }
-  return templates;
-}
-
-/* =========================
-   Error Boundary
-========================= */
-
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err?: any }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { err: undefined };
-  }
-  static getDerivedStateFromError(err: any) {
-    return { err };
-  }
-  componentDidCatch(err: any) {
-    // eslint-disable-next-line no-console
-    console.error("App crashed:", err);
-  }
-  render() {
-    if (this.state.err) {
-      return (
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>Something went wrong.</div>
-            <div style={{ color: "var(--muted)", marginBottom: 10 }}>
-              Open DevTools Console and look for the first red error.
-            </div>
-            <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12, opacity: 0.8 }}>
-              {String(this.state.err?.message ?? this.state.err)}
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children as any;
-  }
-}
-
-/* =========================
-   App
-========================= */
 
 function emptyRecents(): RecentByLevel {
   return { A1: [], A2: [], B1: [], B2: [], C1: [], C2: [] };
 }
 
-function emptyByLevelSeconds(): Record<CEFRLevel, number> {
-  return { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 };
+function formatMMSS(totalSeconds: number) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
 }
 
-export default function App() {
-  const [settings, setSettings] = useState<AppSettings>(() =>
-    kvGet<AppSettings>(LS_SETTINGS, {
-      preferredLevel: "A2",
-      partnerMode: "human",
-      categoryBias: "Any",
-      homeMode: "random",
-    })
-  );
-  useEffect(() => kvSet(LS_SETTINGS, settings), [settings]);
+function hoursString(seconds: number) {
+  const hrs = seconds / 3600;
+  const rounded = Math.round(hrs * 10) / 10;
+  return `${rounded}`;
+}
 
-  const [recents, setRecents] = useState<RecentByLevel>(() => kvGet<RecentByLevel>(LS_RECENTS, emptyRecents()));
-  useEffect(() => kvSet(LS_RECENTS, recents), [recents]);
+function normalizeId(id: string) {
+  return id.trim().toLowerCase();
+}
 
-  const [completion, setCompletion] = useState<CompletionState>(() => kvGet<CompletionState>(LS_COMPLETION, { completedAtById: {} }));
-  useEffect(() => kvSet(LS_COMPLETION, completion), [completion]);
-
-  const [time, setTime] = useState<TimeState>(() =>
-    kvGet<TimeState>(LS_TIME, { goalHours: 300, totalSeconds: 0, byLevelSeconds: emptyByLevelSeconds() })
-  );
-  useEffect(() => kvSet(LS_TIME, time), [time]);
-
-  const [screen, setScreen] = useState<Screen>("home");
-  const [levelSheetLevel, setLevelSheetLevel] = useState<CEFRLevel | null>(null);
-  const [session, setSession] = useState<SessionState | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  function tinyToast(msg: string) {
-    setToast(msg);
-    window.setTimeout(() => setToast(null), 900);
+function stableHash(input: string) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
+  return (h >>> 0).toString(16);
+}
 
-  // Imported sessions (optional)
-  const [imported, setImported] = useState<Template[]>(() => kvGet<Template[]>(LS_IMPORTED, []));
-  useEffect(() => kvSet(LS_IMPORTED, imported), [imported]);
+function extractLevel(s: string): CEFRLevel | null {
+  const m = s.match(/\b(A1|A2|B1|B2|C1|C2)\b/i);
+  if (!m) return null;
+  return m[1].toUpperCase() as CEFRLevel;
+}
 
-  // File-backed library
-  const [fileLibrary, setFileLibrary] = useState<{ loading: boolean; error?: string; templates: Template[] }>({
+function parseMinutes(raw: string): number {
+  const m = raw.match(/(\d+)\s*(?:min|mins|minutes|m)\b/i);
+  if (m) return clamp(parseInt(m[1], 10), 1, 90);
+  const num = parseInt(raw.trim(), 10);
+  if (Number.isFinite(num)) return clamp(num, 1, 90);
+  return 10;
+}
+
+function numberFromId(id: string): number | null {
+  const m = id.match(/(\d{1,6})\s*$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ----------------- library fetch ----------------- */
+
+function useLibraryText() {
+  const [state, setState] = useState<{ loading: boolean; error?: string; text?: string }>({
     loading: true,
-    templates: [],
   });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const raw = await loadPerfectHourText();
-
-        // Detect SPA fallback (HTML) early with a helpful message.
-        if (looksLikeHtml(raw) && !raw.toUpperCase().includes("BEGIN PERFECT HOUR SESSION")) {
+        const res = await fetch("/library/perfect-hour-data.txt", { cache: "no-store" });
+        if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+        const text = await res.text();
+        const head = text.slice(0, 200).toLowerCase();
+        if (head.includes("<!doctype html") || head.includes("<html")) {
           throw new Error(
-            'Library loaded HTML instead of the data file. Put "perfect-hour-data.txt" in "public/library/" so it is served at "/library/perfect-hour-data.txt", then redeploy.'
+            "Loaded HTML instead of the library file. Put perfect-hour-data.txt in public/library/ so it serves at /library/perfect-hour-data.txt."
           );
         }
-
-        const parsed = parsePerfectHourText(raw, settings.preferredLevel, "file");
-        if (!parsed.length) throw new Error("No sessions found. Confirm BEGIN/END PERFECT HOUR SESSION markers exist.");
-
-        if (!cancelled) setFileLibrary({ loading: false, templates: parsed });
+        if (!cancelled) setState({ loading: false, text });
       } catch (e: any) {
-        if (cancelled) return;
-        setFileLibrary({ loading: false, templates: [], error: String(e?.message ?? e) });
+        if (!cancelled) setState({ loading: false, error: e?.message || String(e) });
       }
     })();
+
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const templates = useMemo(() => {
-    // Combine file templates with imported templates
-    return [...fileLibrary.templates, ...imported];
-  }, [fileLibrary.templates, imported]);
+  return state;
+}
 
-  const levelTemplates = useMemo(() => {
-    return templates.filter((t) => t.level === settings.preferredLevel);
-  }, [templates, settings.preferredLevel]);
+/* ----------------- parser ----------------- */
 
-  const completionDoneForLevel = useMemo(() => {
-    const ids = levelTemplates.map((t) => t.id);
-    let done = 0;
-    for (const id of ids) if (completion.completedAtById[id]) done++;
-    return { done, total: ids.length };
-  }, [completion.completedAtById, levelTemplates]);
+function extractBlocks(raw: string): string[] {
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const blocks: string[] = [];
+  let collecting = false;
+  let buf: string[] = [];
 
-  const totalCoverage = useMemo(() => {
-    const ids = templates.map((t) => t.id);
-    let done = 0;
-    for (const id of ids) if (completion.completedAtById[id]) done++;
-    return { done, total: ids.length };
-  }, [completion.completedAtById, templates]);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "BEGIN PERFECT HOUR SESSION") {
+      collecting = true;
+      buf = [trimmed];
+      continue;
+    }
+    if (trimmed === "END PERFECT HOUR SESSION") {
+      if (collecting) {
+        buf.push(trimmed);
+        blocks.push(buf.join("\n"));
+      }
+      collecting = false;
+      buf = [];
+      continue;
+    }
+    if (collecting) buf.push(line);
+  }
+  return blocks;
+}
 
-  const totalHours = time.totalSeconds / 3600;
-  const goalSeconds = Math.max(1, Math.round(time.goalHours * 3600));
-  const goalPct = percent(time.totalSeconds, goalSeconds);
+function normalizeCategory(raw: string): Category {
+  const s = (raw || "").trim();
+  if (!s) return DEFAULT_CATEGORY;
+  const normalized = s.toLowerCase();
 
-  function pushRecent(level: CEFRLevel, id: string, max: number) {
+  const map: Array<[RegExp, Category]> = [
+    [/travel|transit|bus|train|taxi|airport/, "Travel & Transit"],
+    [/food|restaurant|order|cafe|coffee|menu/, "Food & Ordering"],
+    [/housing|home|rent|shop|errand|store|market/, "Housing & Errands"],
+    [/work|job|meeting|office|professional/, "Work & Professional"],
+    [/friend|relationship|date|party|social/, "Social & Relationships"],
+    [/health|doctor|hospital|emergency|medicine/, "Health & Emergencies"],
+    [/culture|polite|manners|respect/, "Culture & Politeness"],
+    [/problem|repair|fix|help|lost|broken/, "Problem Solving"],
+    [/paperwork|admin|form|bank|government/, "Paperwork & Admin"],
+    [/family|kid|child|school|parent/, "Family & Kids"],
+    [/spiritual|ministry|church|faith|prayer/, "Spiritual & Ministry"],
+  ];
+
+  for (const [rx, cat] of map) {
+    if (rx.test(normalized)) return cat;
+  }
+
+  const direct: Record<string, Category> = {
+    "travel & transit": "Travel & Transit",
+    "food & ordering": "Food & Ordering",
+    "housing & errands": "Housing & Errands",
+    "work & professional": "Work & Professional",
+    "social & relationships": "Social & Relationships",
+    "health & emergencies": "Health & Emergencies",
+    "culture & politeness": "Culture & Politeness",
+    "problem solving": "Problem Solving",
+    "paperwork & admin": "Paperwork & Admin",
+    "family & kids": "Family & Kids",
+    "spiritual & ministry": "Spiritual & Ministry",
+    "other": "Other",
+    "everyday": "Everyday",
+  };
+
+  return direct[normalized] || DEFAULT_CATEGORY;
+}
+
+function parseTemplateBlock(block: string, source: "library" | "import"): Template | null {
+  const lines = block.replace(/\r\n/g, "\n").split("\n");
+  const getAfter = (prefix: string) => {
+    const hit = lines.find((l) => l.trim().toLowerCase().startsWith(prefix.toLowerCase()));
+    if (!hit) return "";
+    return hit.split(":").slice(1).join(":").trim();
+  };
+
+  const rawTitle = getAfter("Title");
+  const rawLevel = getAfter("Level");
+  const rawId = getAfter("ID");
+  const rawPartner = getAfter("Partner");
+  const rawGoal = getAfter("Goal (CLB)");
+  const rawContext = getAfter("Context");
+  const rawCorrection = getAfter("Correction");
+  const rawCategory = getAfter("Category");
+
+  const level = extractLevel(rawLevel || lines.join(" ")) || null;
+  if (!rawTitle || !level) return null;
+
+  let partner: Template["partner"] = "either";
+  const p = rawPartner.toLowerCase();
+  if (p.includes("human") && p.includes("ai")) partner = "either";
+  else if (p.includes("human")) partner = "human";
+  else if (p.includes("ai")) partner = "ai";
+
+  const category = normalizeCategory(rawCategory);
+
+  const context = rawContext || "";
+  const baseIdInput = `${rawTitle}||${level}||${context}`;
+  const id = normalizeId(rawId || `${level}-${stableHash(baseIdInput)}`);
+
+  const phases: Phase[] = [];
+  const twists: string[] = [];
+
+  let current: Partial<Phase> | null = null;
+  let readingSteps = false;
+  let readingHelper = false;
+  let readingTwists = false;
+  let helperBuf: string[] = [];
+  let stepsBuf: string[] = [];
+
+  const finalizePhase = () => {
+    if (!current) return;
+    const title = (current.title || "").trim();
+    if (!title) return;
+
+    const minutes = clamp(current.minutes ?? 10, 1, 90);
+    const purpose = (current.purpose || "").trim();
+    const helperScript = helperBuf.join("\n").trim();
+    const learnerSteps = stepsBuf.map((s) => s.trim()).filter(Boolean);
+
+    const phaseId = normalizeId(
+      current.id ||
+        `${id}::phase-${phases.length + 1}-${stableHash(`${title}|${minutes}|${purpose}|${helperScript}`)}`
+    );
+
+    phases.push({
+      id: phaseId,
+      title,
+      minutes,
+      purpose,
+      learnerSteps,
+      helperScript,
+    });
+
+    current = null;
+    readingSteps = false;
+    readingHelper = false;
+    helperBuf = [];
+    stepsBuf = [];
+  };
+
+  const isPhaseLine = (s: string) => s.trim().toUpperCase().startsWith("PHASE");
+  const isTwistsLine = (s: string) => s.trim().toLowerCase().startsWith("twists");
+
+  for (const line of lines) {
+    const t = line.trim();
+
+    if (t === "BEGIN PERFECT HOUR SESSION" || t === "END PERFECT HOUR SESSION") continue;
+
+    if (isPhaseLine(line)) {
+      finalizePhase();
+      readingTwists = false;
+      current = {};
+      const after = line.split(":").slice(1).join(":").trim();
+      if (after) {
+        const namePart = after.replace(/\((.*?)\)/g, "").trim();
+        if (namePart) current.title = namePart;
+        const mm = after.match(/\(([^)]*)\)/);
+        if (mm) current.minutes = parseMinutes(mm[1]);
+      }
+      continue;
+    }
+
+    if (isTwistsLine(line)) {
+      finalizePhase();
+      readingTwists = true;
+      readingSteps = false;
+      readingHelper = false;
+      continue;
+    }
+
+    if (readingTwists) {
+      if (t.startsWith("*")) {
+        const item = t.replace(/^\*\s*/, "").trim();
+        if (item) twists.push(item);
+      }
+      continue;
+    }
+
+    if (!current) continue;
+
+    const lower = t.toLowerCase();
+
+    if (lower.startsWith("name:")) {
+      current.title = t.split(":").slice(1).join(":").trim();
+      continue;
+    }
+    if (lower.startsWith("minutes:")) {
+      current.minutes = parseMinutes(t.split(":").slice(1).join(":").trim());
+      continue;
+    }
+    if (lower.startsWith("purpose:")) {
+      current.purpose = t.split(":").slice(1).join(":").trim();
+      continue;
+    }
+    if (lower.startsWith("human steps:")) {
+      readingSteps = true;
+      readingHelper = false;
+      continue;
+    }
+    if (lower.startsWith("ai helper script:")) {
+      readingHelper = true;
+      readingSteps = false;
+      const rest = t.split(":").slice(1).join(":").trim();
+      if (rest) helperBuf.push(rest);
+      continue;
+    }
+
+    if (readingSteps) {
+      if (t.startsWith("*")) {
+        stepsBuf.push(t.replace(/^\*\s*/, ""));
+      }
+      continue;
+    }
+
+    if (readingHelper) {
+      if (t) helperBuf.push(line.trim());
+      continue;
+    }
+  }
+
+  finalizePhase();
+
+  if (!phases.length) return null;
+
+  return {
+    id,
+    title: rawTitle.trim(),
+    level,
+    partner,
+    goalCLB: rawGoal || undefined,
+    context: context || "",
+    correction: rawCorrection || undefined,
+    category,
+    phases,
+    twists,
+    source,
+  };
+}
+
+function parseImportedText(raw: string): Template[] {
+  const blocks = extractBlocks(raw);
+  const out: Template[] = [];
+  for (const b of blocks) {
+    const t = parseTemplateBlock(b, "import");
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/* ----------------- UI primitives ----------------- */
+
+function Card(props: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        background: "var(--card)",
+        boxShadow: "var(--shadow)",
+        padding: 14,
+        ...props.style,
+      }}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+function Button(props: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "soft" | "ghost";
+  disabled?: boolean;
+  full?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const variant = props.variant || "soft";
+  const base: React.CSSProperties = {
+    borderRadius: 999,
+    padding: "12px 14px",
+    border: "1px solid var(--border)",
+    background: "rgba(15, 23, 42, 0.04)",
+    color: "var(--text)",
+    fontWeight: 900,
+    letterSpacing: "-0.01em",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 44,
+    width: props.full ? "100%" : undefined,
+    opacity: props.disabled ? 0.55 : 1,
+    cursor: props.disabled ? "not-allowed" : "pointer",
+    ...props.style,
+  };
+
+  if (variant === "primary") {
+    base.background =
+      "linear-gradient(180deg, rgba(37,99,235,0.95), rgba(37,99,235,0.86))";
+    base.border = "1px solid rgba(37, 99, 235, 0.35)";
+    base.color = "#fff";
+    base.boxShadow = "var(--shadow-sm)";
+  }
+  if (variant === "ghost") {
+    base.background = "transparent";
+    base.border = "1px solid transparent";
+  }
+
+  return (
+    <button onClick={props.disabled ? undefined : props.onClick} style={base}>
+      {props.children}
+    </button>
+  );
+}
+
+function Pill(props: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: "1px solid var(--border)",
+        background: "rgba(15, 23, 42, 0.03)",
+        color: "var(--muted)",
+        fontWeight: 800,
+        fontSize: 12,
+        ...props.style,
+      }}
+    >
+      {props.children}
+    </span>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: "var(--border)", margin: "12px 0" }} />;
+}
+
+function Collapse(props: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(!!props.defaultOpen);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          borderRadius: 12,
+          padding: "10px 12px",
+          border: "1px solid var(--border)",
+          background: "rgba(15, 23, 42, 0.02)",
+          fontWeight: 900,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <span>{props.title}</span>
+        <span style={{ color: "var(--muted)", fontWeight: 900 }}>{open ? "–" : "+"}</span>
+      </button>
+      {open ? <div style={{ marginTop: 10 }}>{props.children}</div> : null}
+    </div>
+  );
+}
+
+function Sheet(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  if (!props.open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 999,
+        background: "rgba(15,23,42,0.40)",
+        backdropFilter: "blur(6px)",
+        display: "flex",
+        justifyContent: "flex-end",
+      }}
+      onMouseDown={props.onClose}
+    >
+      <div
+        style={{
+          width: "min(520px, 92vw)",
+          height: "100%",
+          background: "rgba(255,255,255,0.88)",
+          borderLeft: "1px solid rgba(15,23,42,0.12)",
+          boxShadow: "0 30px 90px rgba(15,23,42,0.22)",
+          padding: 14,
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontWeight: 980, fontSize: 16, letterSpacing: "-0.02em" }}>{props.title}</div>
+          <Button variant="ghost" onClick={props.onClose}>
+            Close
+          </Button>
+        </div>
+        <div style={{ marginTop: 12 }}>{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
+function MenuButton(props: { label: string; value: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          borderRadius: 999,
+          padding: "10px 12px",
+          border: "1px solid rgba(255,255,255,0.22)",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.10))",
+          color: "rgba(255,255,255,0.92)",
+          fontWeight: 900,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 40,
+          boxShadow: "0 6px 18px rgba(15,23,42,0.10)",
+        }}
+      >
+        <span style={{ opacity: 0.9 }}>{props.label}:</span>
+        <span>{props.value}</span>
+        <span style={{ opacity: 0.75 }}>▾</span>
+      </button>
+
+      {open ? (
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 46,
+            width: 280,
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.92)",
+            border: "1px solid rgba(15,23,42,0.12)",
+            boxShadow: "0 24px 70px rgba(15,23,42,0.18)",
+            overflow: "hidden",
+            zIndex: 20,
+          }}
+        >
+          <div style={{ padding: 10 }} onClick={() => setOpen(false)}>
+            {props.children}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MenuItem(props: { title: string; subtitle?: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={props.onClick}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        borderRadius: 12,
+        padding: "10px 10px",
+        border: "1px solid transparent",
+        background: "transparent",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ fontWeight: 950, letterSpacing: "-0.01em" }}>{props.title}</div>
+      {props.subtitle ? <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{props.subtitle}</div> : null}
+    </button>
+  );
+}
+
+/* ----------------- Error boundary ----------------- */
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message?: string }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(err: any) {
+    return { hasError: true, message: err?.message || String(err) };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: 18 }}>
+          <Card>
+            <div style={{ fontWeight: 980, fontSize: 18 }}>Something went wrong</div>
+            <div style={{ color: "var(--muted)", marginTop: 8 }}>{this.state.message}</div>
+          </Card>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ----------------- App ----------------- */
+
+export default function App() {
+  const lib = useLibraryText();
+
+  const [settings, setSettings] = usePersistedState<Settings>(LS_SETTINGS, {
+    preferredLevel: "A2",
+    partnerMode: "human",
+    mode: "random",
+    goalHours: 300,
+  });
+
+  const [recents, setRecents] = usePersistedState<RecentByLevel>(LS_RECENTS, emptyRecents());
+  const [completions, setCompletions] = usePersistedState<CompletionMap>(LS_COMPLETIONS, {});
+  const [time, setTime] = usePersistedState<{ totalSeconds: number; goalHours: number }>(LS_TIME, {
+    totalSeconds: 0,
+    goalHours: 300,
+  });
+
+  useEffect(() => {
+    if (time.goalHours !== settings.goalHours) setTime((t) => ({ ...t, goalHours: settings.goalHours }));
+  }, [settings.goalHours]); // intentionally only track goalHours
+
+  const [imports, setImports] = usePersistedState<Template[]>(LS_IMPORTS, []);
+
+  const [screen, setScreen] = useState<Screen>("home");
+  const [session, setSession] = useState<SessionState | null>(null);
+  const [sheetLevel, setSheetLevel] = useState<CEFRLevel | null>(null);
+
+  const libraryTemplates = useMemo(() => {
+    if (!lib.text) return [];
+    const blocks = extractBlocks(lib.text);
+    const out: Template[] = [];
+    for (const b of blocks) {
+      const t = parseTemplateBlock(b, "library");
+      if (t) out.push(t);
+    }
+    return out;
+  }, [lib.text]);
+
+  const allTemplates = useMemo(() => {
+    const m = new Map<string, Template>();
+    for (const t of libraryTemplates) m.set(t.id, t);
+    for (const t of imports) m.set(t.id, t);
+    return Array.from(m.values());
+  }, [libraryTemplates, imports]);
+
+  const templatesByLevel = useMemo(() => {
+    const map: Record<CEFRLevel, Template[]> = { A1: [], A2: [], B1: [], B2: [], C1: [], C2: [] };
+    for (const t of allTemplates) map[t.level].push(t);
+
+    for (const l of LEVELS) {
+      map[l].sort((a, b) => {
+        const an = numberFromId(a.id);
+        const bn = numberFromId(b.id);
+        if (an != null && bn != null) return an - bn;
+        return a.title.localeCompare(b.title);
+      });
+    }
+    return map;
+  }, [allTemplates]);
+
+  const coverageByLevel = useMemo(() => {
+    const cov: Record<CEFRLevel, { done: number; total: number; pct: number }> = {
+      A1: { done: 0, total: 0, pct: 0 },
+      A2: { done: 0, total: 0, pct: 0 },
+      B1: { done: 0, total: 0, pct: 0 },
+      B2: { done: 0, total: 0, pct: 0 },
+      C1: { done: 0, total: 0, pct: 0 },
+      C2: { done: 0, total: 0, pct: 0 },
+    };
+
+    for (const level of LEVELS) {
+      const list = templatesByLevel[level];
+      const total = list.length;
+      const done = list.reduce((acc, t) => acc + (completions[t.id]?.completed ? 1 : 0), 0);
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      cov[level] = { done, total, pct };
+    }
+    return cov;
+  }, [templatesByLevel, completions]);
+
+  function pushRecent(level: CEFRLevel, id: string) {
     setRecents((prev) => {
       const cur = prev[level] ?? [];
-      const next = [id, ...cur.filter((x) => x !== id)].slice(0, max);
+      const next = [id, ...cur.filter((x) => x !== id)].slice(0, 6);
       return { ...prev, [level]: next };
     });
   }
 
-  function pickPathTemplate(level: CEFRLevel, categoryBias: CategoryBias): Template | null {
-    const list = templates
-      .filter((t) => t.level === level)
-      .filter((t) => (categoryBias === "Any" ? true : t.category === categoryBias));
-
+  function pickRandom(level: CEFRLevel): Template | null {
+    const list = templatesByLevel[level];
     if (!list.length) return null;
-
-    // Prefer stable numeric order when explicit IDs look like "A2-0012"
-    const numeric = (id: string) => {
-      const m = id.match(/^[a-c][0-2][-_](\d+)/i);
-      return m ? parseInt(m[1], 10) : Number.NaN;
-    };
-
-    const sorted = [...list].sort((a, b) => {
-      const na = numeric(a.id);
-      const nb = numeric(b.id);
-      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-      return a.title.localeCompare(b.title);
-    });
-
-    const nextUncompleted = sorted.find((t) => !completion.completedAtById[t.id]);
-    return nextUncompleted ?? sorted[0];
-  }
-
-  function pickRandomTemplate(level: CEFRLevel, categoryBias: CategoryBias): Template | null {
-    const list = templates
-      .filter((t) => t.level === level)
-      .filter((t) => (categoryBias === "Any" ? true : t.category === categoryBias));
-    if (!list.length) return null;
-
     const avoid = new Set((recents[level] ?? []).slice(0, 6));
     const pool = list.filter((t) => !avoid.has(t.id));
     const pickFrom = pool.length ? pool : list;
-
     const idx = Math.floor(Math.random() * pickFrom.length);
-    return pickFrom[idx] ?? pickFrom[0] ?? null;
+    return pickFrom[idx] || pickFrom[0] || null;
   }
 
-  
-  function startSessionFromTemplate(t: Template) {
-    // Ensure the selected level matches the session (useful when starting from the checklist).
-    if (t.level !== settings.preferredLevel) {
-      setSettings((s) => ({ ...s, preferredLevel: t.level }));
-    }
+  function pickNextInPath(level: CEFRLevel): Template | null {
+    const list = templatesByLevel[level];
+    if (!list.length) return null;
+    return list.find((t) => !completions[t.id]?.completed) || null;
+  }
 
-    pushRecent(t.level, t.id, 8);
-
+  function startTemplate(t: Template) {
+    pushRecent(t.level, t.id);
+    const first = t.phases[0];
     setSession({
       templateId: t.id,
       phaseIndex: 0,
-      remainingSeconds: clampMinutes(t.phases[0]?.minutes ?? 60) * 60,
+      remainingSeconds: clamp(first.minutes, 1, 90) * 60,
       isRunning: false,
+      showHelper: false,
       banner: undefined,
-      completedPhaseIds: [],
-      completedAtEnd: false,
+      isFinished: false,
     });
-
     setScreen("session");
   }
 
-  function startTemplateById(templateId: string) {
-    const t = templates.find((x) => x.id === templateId);
-    if (!t) return;
-    setLevelSheetLevel(null);
-    startSessionFromTemplate(t);
+  function startFromHome() {
+    const level = settings.preferredLevel;
+    const choice = settings.mode === "path" ? pickNextInPath(level) || pickRandom(level) : pickRandom(level);
+    if (choice) startTemplate(choice);
   }
 
-
-function startTemplateFromSheet(t: Template) {
-  setLevelSheetLevel(null);
-  startSessionFromTemplate(t);
-}
-
-function toggleCompleteById(templateId: string) {
-  setCompletion((prev) => {
-    const next = { ...prev.completedAtById };
-    if (next[templateId]) {
-      delete next[templateId];
-    } else {
-      next[templateId] = Date.now();
-    }
-    return { completedAtById: next };
-  });
-}
-
-  function startPerfectHour() {
-      const level = settings.preferredLevel;
-      const bias = settings.categoryBias;
-  
-      const t =
-        settings.homeMode === "path" ? pickPathTemplate(level, bias) : pickRandomTemplate(level, bias);
-  
-      if (!t) return;
-      startSessionFromTemplate(t);
-    }
-
-  function goHome() {
-    setScreen("home");
-    setSession(null);
+  function toggleCompletion(templateId: string, completed: boolean) {
+    setCompletions((prev) => {
+      const next: CompletionMap = { ...prev };
+      next[templateId] = completed ? { completed: true, completedAt: Date.now() } : { completed: false };
+      return next;
+    });
   }
 
-  const currentTemplate = useMemo(() => {
-    if (!session) return null;
-    return templates.find((t) => t.id === session.templateId) ?? null;
-  }, [session, templates]);
-
-  // Time tracking: counts anytime the timer is running (repeats count too)
+  const tickRef = useRef<number | null>(null);
   useEffect(() => {
-    if (screen !== "session" || !session?.isRunning || !currentTemplate) return;
-
-    const level = currentTemplate.level;
-    const id = window.setInterval(() => {
-      setTime((prev) => ({
-        ...prev,
-        totalSeconds: prev.totalSeconds + 1,
-        byLevelSeconds: { ...prev.byLevelSeconds, [level]: (prev.byLevelSeconds[level] ?? 0) + 1 },
-      }));
-    }, 1000);
-
-    return () => window.clearInterval(id);
-  }, [screen, session?.isRunning, currentTemplate]);
-
-  return (
-    <ErrorBoundary>
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "18px 14px 36px" }}>
-        <Card
-          style={{
-            padding: 14,
-            position: "sticky",
-            top: 12,
-            zIndex: 10,
-            background: "linear-gradient(180deg, rgba(37, 99, 235, 0.13), rgba(255,255,255,0.86))",
-            backdropFilter: "blur(14px)",
-                      border: "1px solid var(--border-strong)",
-            boxShadow: "var(--shadow-sm)",
-}}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <div style={{ fontWeight: 995, fontSize: 20, letterSpacing: "-0.04em", backgroundImage: "linear-gradient(90deg, var(--accent), var(--accent2))", WebkitBackgroundClip: "text", color: "transparent" }}>{APP_NAME}</div>
-              <div style={{ color: "var(--muted)", fontSize: 13, maxWidth: 420 }}>
-                {APP_SUBTITLE}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <MenuButton
-                label={`Level: ${settings.preferredLevel}`}
-                items={CEFR_LEVELS.map((lvl) => ({
-                  key: lvl,
-                  label: `${lvl} — ${LEVEL_EQUIV[lvl].label}`,
-                  onSelect: () => setSettings((s) => ({ ...s, preferredLevel: lvl })),
-                }))}
-              />
-              <MenuButton
-                label={`Mode: ${settings.homeMode === "path" ? "Path" : "Random"}`}
-                items={[
-                  { key: "random", label: "Random (fresh practice)", onSelect: () => setSettings((s) => ({ ...s, homeMode: "random" })) },
-                  { key: "path", label: "Path (complete sessions)", onSelect: () => setSettings((s) => ({ ...s, homeMode: "path" })) },
-                ]}
-              />
-              {screen === "session" ? (
-                <Button variant="soft" onClick={goHome}>
-                  Home
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </Card>
-
-        <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
-          {screen === "home" ? (
-            <>
-              <Card>
-              {/* Visible guidance: one short line */}
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: "-0.02em" }}>Home</div>
-                  <div style={{ color: "var(--muted)", marginTop: 4 }}>{APP_TAGLINE}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 900 }}>{totalHours.toFixed(1)}h</div>
-                  <div style={{ color: "var(--muted)", fontSize: 12 }}>of {time.goalHours}h</div>
-                </div>
-              </div>
-
-              <div style={{ height: 10 }} />
-
-              {/* Hours progress (minimal, premium) */}
-              <div style={{ display: "grid", gap: 8 }}>
-                <div
-                  style={{
-                    height: 10,
-                    borderRadius: 999,
-                    border: "1px solid var(--border)",
-                    background: "rgba(15, 23, 42, 0.03)",
-                    overflow: "hidden",
-                    boxShadow: "var(--shadow-sm)",
-                  }}
-                >
-                  <div style={{ height: "100%", width: `${goalPct}%`, background: "rgba(37, 99, 235, 0.24)" }} />
-                </div>
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>Progress toward your hours goal.</div>
-              </div>
-
-              <div style={{ height: 12 }} />
-
-              {/* Duolingo-style level path (selectable, no lock) */}
-              <div style={{ display: "grid", gap: 8 }}>
-                {CEFR_LEVELS.map((lvl) => {
-                  const list = templates.filter((t) => t.level === lvl);
-                  const done = list.filter((t) => completion.completedAtById[t.id]).length;
-                  const p = percent(done, list.length);
-                  const active = lvl === settings.preferredLevel;
-                  return (
-                    <button
-                      key={lvl}
-                      onClick={() => {
-                      setSettings((s) => ({ ...s, preferredLevel: lvl }));
-                      setLevelSheetLevel(lvl);
-                    }}
-                      style={{
-                        ...levelRowStyle,
-                        borderColor: active ? "rgba(37, 99, 235, 0.35)" : "var(--border)",
-                        boxShadow: active ? "0 0 0 4px rgba(37, 99, 235, 0.08), var(--shadow-sm)" : "var(--shadow-sm)",
-                        background: active ? "rgba(37, 99, 235, 0.04)" : "rgba(255,255,255,0.55)",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ display: "grid", gap: 2, textAlign: "left" }}>
-                          <div style={{ fontWeight: 950, letterSpacing: "-0.01em" }}>
-                            {lvl} <span style={{ color: "var(--muted)", fontWeight: 700 }}>• {LEVEL_EQUIV[lvl].label}</span>
-                          </div>
-                          <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                            Coverage: {p}% • {done}/{list.length || 0}
-                          </div>
-                        </div>
-
-                        <div style={{ minWidth: 56, textAlign: "right" }}>
-                          <div style={{ fontWeight: 900 }}>{p}%</div>
-                          <div style={{ color: "var(--muted)", fontSize: 12 }}>{LEVEL_EQUIV[lvl].clb}</div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div style={{ height: 12 }} />
-
-              {fileLibrary.error ? (
-                <div style={{ color: "rgba(220, 38, 38, 0.92)" }}>
-                  <strong>Library issue:</strong> {fileLibrary.error}
-                </div>
-              ) : null}
-
-              <Button variant="primary" onClick={startPerfectHour} disabled={fileLibrary.loading || !!fileLibrary.error || levelTemplates.length === 0} full>
-                Start my fluent hour
-              </Button>
-
-              <div style={{ height: 12 }} />
-
-              <Collapse title="Advanced" defaultOpen={false}>
-                <div style={{ display: "grid", gap: 12 }}>
-                  <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 900 }}>Mode</div>
-                        <select
-                          value={settings.homeMode}
-                          onChange={(e) => setSettings((s) => ({ ...s, homeMode: e.target.value as HomeMode }))}
-                          style={inputStyle}
-                        >
-                          <option value="random">Random (within level)</option>
-                          <option value="path">Path (next uncompleted)</option>
-                        </select>
-                      </div>
-
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 900 }}>Focus category</div>
-                        <select
-                          value={settings.categoryBias}
-                          onChange={(e) => setSettings((s) => ({ ...s, categoryBias: e.target.value as CategoryBias }))}
-                          style={inputStyle}
-                        >
-                          {CATEGORY_OPTIONS.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                        <div style={{ color: "var(--muted)", fontSize: 12 }}>Optional. Random and Path both stay inside your selected level.</div>
-                      </div>
-
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 900 }}>Partner mode</div>
-                        <select
-                          value={settings.partnerMode}
-                          onChange={(e) => setSettings((s) => ({ ...s, partnerMode: e.target.value as PartnerMode }))}
-                          style={inputStyle}
-                        >
-                          <option value="human">Human helper (preferred)</option>
-                          <option value="ai">AI helper (fallback)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div style={{ fontWeight: 900 }}>Goals and totals</div>
-                      <Pill>
-                        Coverage: {totalCoverage.done}/{totalCoverage.total}
-                      </Pill>
-                    </div>
-
-                    <div style={{ height: 10 }} />
-
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <label style={{ display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 900 }}>Hours goal</div>
-                        <input
-                          type="number"
-                          min={1}
-                          step={10}
-                          value={time.goalHours}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10);
-                            setTime((prev) => ({ ...prev, goalHours: Number.isFinite(n) ? n : prev.goalHours }));
-                          }}
-                          style={inputStyle}
-                        />
-                      </label>
-
-                      <div style={{ color: "var(--muted)", fontSize: 12 }}>Time always counts, even when you repeat sessions.</div>
-
-                      <Button
-                        variant="soft"
-                        onClick={() => {
-                          if (!confirm("Reset time totals? This cannot be undone.")) return;
-                          setTime({ goalHours: time.goalHours, totalSeconds: 0, byLevelSeconds: emptyByLevelSeconds() });
-                        }}
-                      >
-                        Reset time totals
-                      </Button>
-
-                      <Button
-                        variant="soft"
-                        onClick={() => {
-                          if (!confirm("Reset coverage completion? This cannot be undone.")) return;
-                          setCompletion({ completedAtById: {} });
-                        }}
-                      >
-                        Reset coverage completion
-                      </Button>
-                    </div>
-                  </Card>
-
-                  <ImportBuilder
-                    onToast={tinyToast}
-                    onImport={(parsed) => setImported((prev) => [...parsed, ...prev])}
-                    defaultLevel={settings.preferredLevel}
-                    defaultCategory={settings.categoryBias === "Any" ? "Daily life" : (settings.categoryBias as Category)}
-                  />
-                </div>
-              </Collapse>
-            </Card>
-
-            {levelSheetLevel ? (
-              <LevelChecklistSheet
-                level={levelSheetLevel}
-                templates={templates}
-                completion={completion}
-                onStartTemplate={startTemplateFromSheet}
-                onToggleComplete={toggleCompleteById}
-                onClose={() => setLevelSheetLevel(null)}
-              />
-            ) : null}
-            </>
-          ) : (
-            <Runner
-              settings={settings}
-              template={currentTemplate}
-              session={session}
-              setSession={setSession}
-              onCopy={async (txt) => tinyToast((await copyToClipboard(txt)) ? "Copied" : "Copy failed")}
-              onMarkComplete={() => {
-                if (!currentTemplate) return;
-                setCompletion((prev) => {
-                  if (prev.completedAtById[currentTemplate.id]) return prev;
-                  return { completedAtById: { ...prev.completedAtById, [currentTemplate.id]: Date.now() } };
-                });
-                tinyToast("Marked complete");
-              }}
-            />
-          )}
-        </div>
-
-        {toast ? <Toast msg={toast} /> : null}
-      </div>
-    </ErrorBoundary>
-  );
-}
-
-/* =========================
-   Runner (Session screen)
-========================= */
-
-function Runner(props: {
-  settings: AppSettings;
-  template: Template | null;
-  session: SessionState | null;
-  setSession: React.Dispatch<React.SetStateAction<SessionState | null>>;
-  onCopy: (txt: string) => void;
-  onMarkComplete: () => void;
-}) {
-  const s = props.session;
-  const t = props.template;
-
-  if (!s || !t) {
-    return (
-      <Card>
-        <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: "-0.02em" }}>Session</div>
-        <div style={{ color: "var(--muted)", marginTop: 4 }}>No active session.</div>
-      </Card>
-    );
-  }
-
-  const phase = t.phases[s.phaseIndex] ?? t.phases[0];
-  const phaseTotalSeconds = clampMinutes(phase.minutes) * 60;
-  const progress = phaseTotalSeconds <= 0 ? 0 : 1 - s.remainingSeconds / phaseTotalSeconds;
-
-  // Autopause timer tick
-  const intervalRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!s.isRunning) {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (!session?.isRunning) {
+      if (tickRef.current) window.clearInterval(tickRef.current);
+      tickRef.current = null;
       return;
     }
 
-    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    if (tickRef.current) window.clearInterval(tickRef.current);
 
-    intervalRef.current = window.setInterval(() => {
-      props.setSession((prev) => {
-        if (!prev || !t) return prev;
-        if (!prev.isRunning) return prev;
+    tickRef.current = window.setInterval(() => {
+      setSession((prev) => {
+        if (!prev || !prev.isRunning) return prev;
 
-        const next = prev.remainingSeconds - 1;
-        if (next > 0) return { ...prev, remainingSeconds: next };
+        setTime((t) => ({ ...t, totalSeconds: t.totalSeconds + 1 }));
 
-        const currentPhaseId = t.phases[prev.phaseIndex]?.id;
-        const completedPhaseIds =
-          currentPhaseId && !prev.completedPhaseIds.includes(currentPhaseId)
-            ? [...prev.completedPhaseIds, currentPhaseId]
-            : prev.completedPhaseIds;
+        const nextRemaining = prev.remainingSeconds - 1;
+        if (nextRemaining > 0) return { ...prev, remainingSeconds: nextRemaining };
 
-        const atEnd = prev.phaseIndex >= t.phases.length - 1;
+        const tmpl = allTemplates.find((x) => x.id === prev.templateId) || null;
+        if (!tmpl) return { ...prev, remainingSeconds: 0, isRunning: false, showHelper: false };
+
+        const atEnd = prev.phaseIndex >= tmpl.phases.length - 1;
         if (atEnd) {
-          return { ...prev, completedPhaseIds, remainingSeconds: 0, isRunning: false, showHelper: false, banner: "Session complete" };
+          return {
+            ...prev,
+            remainingSeconds: 0,
+            isRunning: false,
+            showHelper: false,
+            banner: "Session complete",
+            isFinished: true,
+          };
         }
 
         const nextIndex = prev.phaseIndex + 1;
-        const nextPhase = t.phases[nextIndex];
-
+        const nextPhase = tmpl.phases[nextIndex];
         return {
           ...prev,
-          completedPhaseIds,
           phaseIndex: nextIndex,
-          remainingSeconds: clampMinutes(nextPhase.minutes) * 60,
+          remainingSeconds: clamp(nextPhase.minutes, 1, 90) * 60,
           isRunning: false,
           showHelper: false,
           banner: "Phase complete",
@@ -1192,12 +896,513 @@ function Runner(props: {
     }, 1000);
 
     return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+      if (tickRef.current) window.clearInterval(tickRef.current);
+      tickRef.current = null;
     };
-  }, [s.isRunning, props, t]);
+  }, [session?.isRunning, allTemplates, setTime]);
 
-  // While running, helper must be hidden
+  const activeTemplate = useMemo(() => {
+    if (!session) return null;
+    return allTemplates.find((t) => t.id === session.templateId) || null;
+  }, [session, allTemplates]);
+
+  const [importLevel, setImportLevel] = useState<CEFRLevel>(settings.preferredLevel);
+  const [importCategory, setImportCategory] = useState<Category>("Everyday");
+  const [importPartner, setImportPartner] = useState<Template["partner"]>("either");
+  const [importContext, setImportContext] = useState("");
+  const [importPaste, setImportPaste] = useState("");
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
+  function buildImportPrompt() {
+    const level = importLevel;
+    const cat = importCategory;
+    const partner = importPartner;
+    const extra = importContext.trim() ? `\nExtra context for cultural fit:\n- ${importContext.trim()}` : "";
+
+    return `Create ONE "FluentHour" PERFECT HOUR SESSION in this exact plain-text format.
+
+Requirements:
+- Use these markers on their own lines:
+  BEGIN PERFECT HOUR SESSION
+  END PERFECT HOUR SESSION
+- Level: ${level}
+- Category: ${cat}
+- Partner: ${partner === "either" ? "Human or AI" : partner === "human" ? "Human" : "AI"}
+- Four phases. Total minutes must equal 60.
+- Each phase must include:
+  Name:
+  Minutes:
+  Purpose:
+  Human steps: (bullet list using "* ")
+  AI helper script:
+- Include:
+  Goal (CLB):
+  Context:
+  Correction:
+  Twists: (bullet list using "* ")
+${extra}
+
+Output ONLY the session text.`;
+  }
+
+  function copyText(text: string) {
+    navigator.clipboard?.writeText(text).catch(() => {});
+  }
+
+  function doImport() {
+    setImportMsg(null);
+    const incoming = parseImportedText(importPaste);
+    if (!incoming.length) {
+      setImportMsg("No valid sessions found. Make sure markers exist and format matches.");
+      return;
+    }
+
+    setImports((prev) => {
+      const map = new Map<string, Template>();
+      for (const t of prev) map.set(t.id, t);
+      for (const t of incoming) map.set(t.id, t);
+      return Array.from(map.values());
+    });
+
+    setImportPaste("");
+    setImportMsg(`Imported ${incoming.length} session${incoming.length === 1 ? "" : "s"}.`);
+  }
+
+  const headerStyle: React.CSSProperties = {
+    padding: 14,
+    position: "sticky",
+    top: 12,
+    zIndex: 10,
+    borderRadius: "var(--radius)",
+    border: "1px solid rgba(255,255,255,0.18)",
+    background:
+      "radial-gradient(900px 220px at 20% -60%, rgba(37,99,235,0.40), transparent 60%)," +
+      "radial-gradient(900px 240px at 110% 0%, rgba(15,23,42,0.18), transparent 62%)," +
+      "linear-gradient(180deg, rgba(15,23,42,0.62), rgba(15,23,42,0.44))",
+    boxShadow: "0 18px 60px rgba(15,23,42,0.24)",
+    color: "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(14px)",
+  };
+
+  const topContainerStyle: React.CSSProperties = { maxWidth: 980, margin: "0 auto", padding: "18px 14px 40px" };
+
+  const totalPct = clamp((time.totalSeconds / 3600 / Math.max(1, settings.goalHours)) * 100, 0, 100);
+
+  return (
+    <ErrorBoundary>
+      <div style={topContainerStyle}>
+        <div style={headerStyle}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ fontWeight: 990, letterSpacing: "-0.03em", fontSize: 16 }}>{APP_NAME}</div>
+              <div style={{ opacity: 0.86, fontSize: 13 }}>{APP_SUBTITLE}</div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {screen === "session" ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setSession(null);
+                    setScreen("home");
+                  }}
+                  style={{ color: "rgba(255,255,255,0.92)" }}
+                >
+                  Home
+                </Button>
+              ) : (
+                <>
+                  <MenuButton label="Level" value={settings.preferredLevel}>
+                    {LEVELS.map((lvl) => (
+                      <MenuItem
+                        key={lvl}
+                        title={`${lvl} — ${LEVEL_LABEL[lvl]}`}
+                        subtitle={`${coverageByLevel[lvl].done} of ${coverageByLevel[lvl].total} completed`}
+                        onClick={() => setSettings((s) => ({ ...s, preferredLevel: lvl }))}
+                      />
+                    ))}
+                  </MenuButton>
+
+                  <MenuButton label="Mode" value={settings.mode === "random" ? "Random" : "Path"}>
+                    <MenuItem title="Random" subtitle="Fresh practice within your level" onClick={() => setSettings((s) => ({ ...s, mode: "random" }))} />
+                    <MenuItem title="Path" subtitle="Next uncompleted session" onClick={() => setSettings((s) => ({ ...s, mode: "path" }))} />
+                  </MenuButton>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+          {screen === "home" ? (
+            <>
+              <Card>
+                <div style={{ fontWeight: 980, fontSize: 18, letterSpacing: "-0.02em" }}>Start at your level.</div>
+                <div style={{ color: "var(--muted)", marginTop: 6, lineHeight: 1.35 }}>{APP_TAGLINE}</div>
+
+                <Divider />
+
+                <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 980, fontSize: 28, letterSpacing: "-0.02em" }}>{hoursString(time.totalSeconds)}</div>
+                  <div style={{ color: "var(--muted)", fontWeight: 900 }}>hours of {settings.goalHours} hours</div>
+                  <Pill style={{ marginLeft: "auto" }}>{Math.round(totalPct)}%</Pill>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    border: "1px solid var(--border)",
+                    background: "rgba(15, 23, 42, 0.03)",
+                    overflow: "hidden",
+                    boxShadow: "var(--shadow-sm)",
+                  }}
+                >
+                  <div style={{ height: "100%", width: `${Math.round(totalPct)}%`, background: "rgba(37, 99, 235, 0.26)" }} />
+                </div>
+
+                <div style={{ height: 12 }} />
+
+                <Button
+                  variant="primary"
+                  onClick={startFromHome}
+                  disabled={lib.loading || !!lib.error || templatesByLevel[settings.preferredLevel].length === 0}
+                  full
+                >
+                  Start my fluent hour
+                </Button>
+
+                {lib.error ? (
+                  <div style={{ marginTop: 12, color: "rgba(220, 38, 38, 0.92)" }}>
+                    <strong>Library issue:</strong> {lib.error}
+                  </div>
+                ) : null}
+
+                {lib.loading ? <div style={{ marginTop: 10, color: "var(--muted)" }}>Loading library…</div> : null}
+
+                <Divider />
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontWeight: 950, letterSpacing: "-0.01em" }}>Levels</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {LEVELS.map((lvl) => {
+                      const cov = coverageByLevel[lvl];
+                      const selected = settings.preferredLevel === lvl;
+                      return (
+                        <button
+                          key={lvl}
+                          onClick={() => setSheetLevel(lvl)}
+                          style={{
+                            textAlign: "left",
+                            borderRadius: 16,
+                            padding: "12px 12px",
+                            border: selected ? "1px solid rgba(37, 99, 235, 0.30)" : "1px solid var(--border)",
+                            background: selected
+                              ? "linear-gradient(180deg, rgba(37,99,235,0.10), rgba(37,99,235,0.05))"
+                              : "rgba(15,23,42,0.02)",
+                            boxShadow: "var(--shadow-sm)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div style={{ display: "grid", gap: 3 }}>
+                            <div style={{ fontWeight: 980, letterSpacing: "-0.01em" }}>
+                              {lvl} <span style={{ color: "var(--muted)", fontWeight: 900 }}>— {LEVEL_LABEL[lvl]}</span>
+                            </div>
+                            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                              {cov.done} of {cov.total} completed
+                            </div>
+                          </div>
+
+                          <Pill>{cov.pct}%</Pill>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ color: "var(--muted)", fontSize: 13 }}>Tip: repeats still count toward hours.</div>
+                </div>
+
+                <div style={{ height: 12 }} />
+
+                <Collapse title="Advanced" defaultOpen={false}>
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15,23,42,0.02)" }}>
+                      <div style={{ fontWeight: 950 }}>Goal and partner</div>
+                      <div style={{ height: 10 }} />
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <div style={{ color: "var(--muted)", fontWeight: 900 }}>Hours goal</div>
+                        <input
+                          type="number"
+                          min={10}
+                          max={5000}
+                          value={settings.goalHours}
+                          onChange={(e) =>
+                            setSettings((s) => ({
+                              ...s,
+                              goalHours: clamp(parseInt(e.target.value || "300", 10), 10, 5000),
+                            }))
+                          }
+                        />
+                      </label>
+
+                      <div style={{ height: 10 }} />
+
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <div style={{ color: "var(--muted)", fontWeight: 900 }}>Partner mode</div>
+                        <select
+                          value={settings.partnerMode}
+                          onChange={(e) => setSettings((s) => ({ ...s, partnerMode: e.target.value as PartnerMode }))}
+                        >
+                          <option value="human">Human helper (preferred)</option>
+                          <option value="ai">AI helper (fallback)</option>
+                        </select>
+                      </label>
+                    </Card>
+
+                    <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15,23,42,0.02)" }}>
+                      <div style={{ fontWeight: 950 }}>Import (Advanced)</div>
+                      <div style={{ color: "var(--muted)", marginTop: 6 }}>Generate a session with an AI, then paste it here.</div>
+
+                      <div style={{ height: 10 }} />
+
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <div style={{ color: "var(--muted)", fontWeight: 900 }}>Level</div>
+                          <select value={importLevel} onChange={(e) => setImportLevel(e.target.value as CEFRLevel)}>
+                            {LEVELS.map((l) => (
+                              <option key={l} value={l}>
+                                {l}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <div style={{ color: "var(--muted)", fontWeight: 900 }}>Focus category</div>
+                          <select value={importCategory} onChange={(e) => setImportCategory(e.target.value as Category)}>
+                            {[
+                              "Everyday",
+                              "Travel & Transit",
+                              "Food & Ordering",
+                              "Housing & Errands",
+                              "Work & Professional",
+                              "Social & Relationships",
+                              "Health & Emergencies",
+                              "Culture & Politeness",
+                              "Problem Solving",
+                              "Paperwork & Admin",
+                              "Family & Kids",
+                              "Spiritual & Ministry",
+                              "Other",
+                            ].map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <div style={{ color: "var(--muted)", fontWeight: 900 }}>Partner</div>
+                          <select value={importPartner} onChange={(e) => setImportPartner(e.target.value as Template["partner"])}>
+                            <option value="either">Human or AI</option>
+                            <option value="human">Human</option>
+                            <option value="ai">AI</option>
+                          </select>
+                        </label>
+
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <div style={{ color: "var(--muted)", fontWeight: 900 }}>Extra context (optional)</div>
+                          <textarea value={importContext} onChange={(e) => setImportContext(e.target.value)} />
+                        </label>
+
+                        <Button
+                          variant="soft"
+                          onClick={() => {
+                            copyText(buildImportPrompt());
+                            setImportMsg("AI prompt copied.");
+                          }}
+                        >
+                          Copy AI prompt
+                        </Button>
+
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <div style={{ color: "var(--muted)", fontWeight: 900 }}>Paste AI output</div>
+                          <textarea value={importPaste} onChange={(e) => setImportPaste(e.target.value)} />
+                        </label>
+
+                        <Button variant="primary" onClick={doImport} disabled={!importPaste.trim()} full>
+                          Import session
+                        </Button>
+
+                        {importMsg ? <div style={{ color: "var(--muted)" }}>{importMsg}</div> : null}
+                      </div>
+                    </Card>
+
+                    <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15,23,42,0.02)" }}>
+                      <div style={{ fontWeight: 950 }}>About</div>
+                      <div style={{ color: "var(--muted)", marginTop: 6 }}>
+                        You will improve with consistent, guided speaking practice. Choose a level and follow the steps with a helper.
+                      </div>
+                    </Card>
+                  </div>
+                </Collapse>
+              </Card>
+
+              <Sheet open={sheetLevel != null} title={sheetLevel ? `${sheetLevel} checklist` : "Checklist"} onClose={() => setSheetLevel(null)}>
+                {sheetLevel ? (
+                  <LevelChecklist
+                    templates={templatesByLevel[sheetLevel]}
+                    completions={completions}
+                    onToggleComplete={(id, next) => toggleCompletion(id, next)}
+                    onStart={(id) => {
+                      const t = allTemplates.find((x) => x.id === id) || null;
+                      if (t) startTemplate(t);
+                      setSheetLevel(null);
+                    }}
+                  />
+                ) : null}
+              </Sheet>
+            </>
+          ) : (
+            <SessionRunner
+              template={activeTemplate}
+              session={session}
+              setSession={setSession}
+              onMarkComplete={() => {
+                if (!session) return;
+                toggleCompletion(session.templateId, true);
+              }}
+              isCompleted={session ? !!completions[session.templateId]?.completed : false}
+              partnerMode={settings.partnerMode}
+              onCopy={copyText}
+            />
+          )}
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+/* ----------------- Checklist ----------------- */
+
+function LevelChecklist(props: {
+  templates: Template[];
+  completions: CompletionMap;
+  onToggleComplete: (id: string, next: boolean) => void;
+  onStart: (id: string) => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "incomplete" | "complete">("incomplete");
+
+  const rows = useMemo(() => {
+    const items = props.templates.map((t) => ({
+      t,
+      done: !!props.completions[t.id]?.completed,
+    }));
+
+    items.sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.t.title.localeCompare(b.t.title);
+    });
+
+    if (filter === "all") return items;
+    if (filter === "complete") return items.filter((x) => x.done);
+    return items.filter((x) => !x.done);
+  }, [props.templates, props.completions, filter]);
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Button variant={filter === "incomplete" ? "primary" : "soft"} onClick={() => setFilter("incomplete")}>
+          Incomplete
+        </Button>
+        <Button variant={filter === "complete" ? "primary" : "soft"} onClick={() => setFilter("complete")}>
+          Complete
+        </Button>
+        <Button variant={filter === "all" ? "primary" : "soft"} onClick={() => setFilter("all")}>
+          All
+        </Button>
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map(({ t, done }) => (
+          <div
+            key={t.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => props.onStart(t.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") props.onStart(t.id);
+            }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "28px 1fr auto",
+              gap: 10,
+              alignItems: "center",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: "10px 10px",
+              background: "rgba(15,23,42,0.02)",
+              boxShadow: "var(--shadow-sm)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={done}
+              onChange={(e) => props.onToggleComplete(t.id, e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 18, height: 18 }}
+              aria-label="Mark complete"
+            />
+            <div style={{ display: "grid", gap: 2 }}>
+              <div style={{ fontWeight: 950, letterSpacing: "-0.01em" }}>{t.title}</div>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                {t.category} • {t.partner === "either" ? "Human or AI" : t.partner === "human" ? "Human" : "AI"}
+              </div>
+            </div>
+            <Pill>{done ? "Done" : "Start"}</Pill>
+          </div>
+        ))}
+
+        {!rows.length ? <div style={{ color: "var(--muted)" }}>Nothing here yet.</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------- Session Runner ----------------- */
+
+function SessionRunner(props: {
+  template: Template | null;
+  session: SessionState | null;
+  setSession: React.Dispatch<React.SetStateAction<SessionState | null>>;
+  onMarkComplete: () => void;
+  isCompleted: boolean;
+  partnerMode: PartnerMode;
+  onCopy: (text: string) => void;
+}) {
+  const s = props.session;
+  const t = props.template;
+
+  if (!s || !t) {
+    return (
+      <Card>
+        <div style={{ fontWeight: 980, fontSize: 18 }}>Session</div>
+        <div style={{ color: "var(--muted)", marginTop: 8 }}>No active session.</div>
+      </Card>
+    );
+  }
+
+  const phase = t.phases[s.phaseIndex] || t.phases[0];
+  const phaseTotalSeconds = clamp(phase.minutes, 1, 90) * 60;
+  const phaseProgress = phaseTotalSeconds ? 1 - s.remainingSeconds / phaseTotalSeconds : 0;
+
   useEffect(() => {
     if (s.isRunning && s.showHelper) {
       props.setSession((prev) => (prev ? { ...prev, showHelper: false } : prev));
@@ -1208,104 +1413,62 @@ function Runner(props: {
     props.setSession((prev) => (prev ? { ...prev, isRunning: !prev.isRunning, banner: undefined } : prev));
   }
 
-  function restartPhase() {
-    props.setSession((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        remainingSeconds: clampMinutes(phase.minutes) * 60,
-        isRunning: false,
-        showHelper: false,
-        banner: "Restarted",
-      };
-    });
-  }
-
   function skipToNext() {
-    // counts the current phase as done (even if you finish early)
     props.setSession((prev) => {
       if (!prev) return prev;
-
-      const currentPhaseId = t.phases[prev.phaseIndex]?.id;
-      const completedPhaseIds =
-        currentPhaseId && !prev.completedPhaseIds.includes(currentPhaseId)
-          ? [...prev.completedPhaseIds, currentPhaseId]
-          : prev.completedPhaseIds;
-
       const atEnd = prev.phaseIndex >= t.phases.length - 1;
       if (atEnd) {
-        return { ...prev, completedPhaseIds, isRunning: false, remainingSeconds: 0, showHelper: false, banner: "Session complete" };
+        return { ...prev, isRunning: false, remainingSeconds: 0, showHelper: false, banner: "Session complete", isFinished: true };
       }
-
       const nextIndex = prev.phaseIndex + 1;
       const nextPhase = t.phases[nextIndex];
-
-      return {
-        ...prev,
-        completedPhaseIds,
-        phaseIndex: nextIndex,
-        remainingSeconds: clampMinutes(nextPhase.minutes) * 60,
-        isRunning: false,
-        showHelper: false,
-        banner: "Moved to next phase",
-      };
+      return { ...prev, phaseIndex: nextIndex, remainingSeconds: clamp(nextPhase.minutes, 1, 90) * 60, isRunning: false, showHelper: false, banner: "Moved to next phase" };
     });
   }
 
-  const helperBundle = useMemo(() => {
-    const eq = LEVEL_EQUIV[t.level];
+  function toggleHelper() {
+    props.setSession((prev) => (prev ? { ...prev, showHelper: !prev.showHelper } : prev));
+  }
+
+  const helperText = useMemo(() => {
+    const partnerLine =
+      props.partnerMode === "human"
+        ? "You are my human language helper. Keep turns short and natural."
+        : "You are my AI language helper. Keep turns short and natural.";
     return [
-      "You are my language helper.",
-      `Level: ${t.level} (${eq.actfl}; ${eq.clb})`,
+      partnerLine,
+      `Level: ${t.level}`,
       `Session: ${t.title}`,
       `Context: ${t.context}`,
-      t.goalCLB ? `Goal (CLB): ${t.goalCLB}` : "",
-      t.correction ? `Correction: ${t.correction}` : "",
+      t.goalCLB ? `Goal: ${t.goalCLB}` : "",
+      t.correction ? `Correction focus: ${t.correction}` : "",
       "",
-      `Current phase: ${phase.title} (${clampMinutes(phase.minutes)} minutes)`,
+      `Phase: ${phase.title} (${phase.minutes} minutes)`,
       `Purpose: ${phase.purpose}`,
       "",
       "Learner steps:",
-      ...phase.learnerSteps.map((x, idx) => `${idx + 1}. ${x}`),
+      ...phase.learnerSteps.map((x, i) => `${i + 1}. ${x}`),
       "",
       "Helper script:",
       phase.helperScript,
     ]
       .filter(Boolean)
       .join("\n");
-  }, [t, phase]);
+  }, [t, phase, props.partnerMode]);
 
   return (
     <Card>
-      {/* Visible guidance: one short line */}
-      <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: "-0.02em" }}>Session</div>
+      <div style={{ fontWeight: 980, fontSize: 18, letterSpacing: "-0.02em" }}>Session</div>
       <div style={{ color: "var(--muted)", marginTop: 4 }}>
         {t.level} • {t.category} • Phase {s.phaseIndex + 1} of {t.phases.length}
       </div>
 
       <div style={{ height: 12 }} />
 
-      {/* Banner for phase/session transitions */}
-      {s.banner ? (
-        <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(37, 99, 235, 0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 900 }}>{s.banner}</div>
-            {s.banner === "Session complete" ? (
-              <Button variant="soft" onClick={props.onMarkComplete}>
-                Mark complete
-              </Button>
-            ) : null}
-          </div>
-        </Card>
-      ) : null}
-
-      <div style={{ height: 12 }} />
-
-      {/* Timer card */}
       <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(37, 99, 235, 0.04)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontWeight: 980, fontSize: 30, letterSpacing: "-0.02em" }}>{formatMMSS(s.remainingSeconds)}</div>
+            <div style={{ fontWeight: 980, fontSize: 34, letterSpacing: "-0.02em" }}>{formatMMSS(s.remainingSeconds)}</div>
             <div style={{ color: "var(--muted)", marginTop: 4 }}>{phase.title}</div>
           </div>
 
@@ -1316,14 +1479,24 @@ function Runner(props: {
 
         <div style={{ height: 10 }} />
 
-        <div style={{ height: 10, borderRadius: 999, border: "1px solid var(--border)", background: "rgba(15, 23, 42, 0.03)", overflow: "hidden", boxShadow: "var(--shadow-sm)" }}>
-          <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: "rgba(37, 99, 235, 0.26)" }} />
+        <div
+          style={{
+            height: 10,
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            background: "rgba(15, 23, 42, 0.03)",
+            overflow: "hidden",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
+          <div style={{ height: "100%", width: `${Math.round(phaseProgress * 100)}%`, background: "rgba(37, 99, 235, 0.26)" }} />
         </div>
+
+        {s.banner ? <div style={{ marginTop: 10, color: "var(--muted)", fontWeight: 900 }}>{s.banner}</div> : null}
       </Card>
 
       <div style={{ height: 12 }} />
 
-      {/* Learner card */}
       <Card style={{ boxShadow: "var(--shadow-sm)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ fontWeight: 950 }}>Learner</div>
@@ -1334,7 +1507,7 @@ function Runner(props: {
           <strong>Situation:</strong> {t.title}. {t.context}
         </div>
 
-        {(t.goalCLB || t.correction) ? (
+        {t.goalCLB || t.correction ? (
           <div style={{ marginTop: 10, display: "grid", gap: 8, color: "var(--muted)" }}>
             {t.goalCLB ? (
               <div>
@@ -1360,693 +1533,73 @@ function Runner(props: {
 
       <div style={{ height: 12 }} />
 
+      {s.isFinished ? (
+        <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(16,185,129,0.06)" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 950 }}>{props.isCompleted ? "Completed" : "Session ended"}</div>
+            {!props.isCompleted ? (
+              <Button variant="primary" onClick={props.onMarkComplete}>
+                Mark complete
+              </Button>
+            ) : (
+              <Pill>Saved</Pill>
+            )}
+          </div>
+        </Card>
+      ) : null}
+
+      <div style={{ height: 12 }} />
+
       <Collapse title="Advanced" defaultOpen={false}>
         <div style={{ display: "grid", gap: 12 }}>
-          <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
+          <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15,23,42,0.02)" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button variant="soft" onClick={restartPhase}>
-                Restart phase
-              </Button>
               <Button variant="soft" onClick={skipToNext}>
                 Skip to next
               </Button>
-              {!s.isRunning ? (
-                <Button
-                  variant="soft"
-                  onClick={() => props.setSession((prev) => (prev ? { ...prev, showHelper: !prev.showHelper } : prev))}
+              <Button variant="soft" onClick={toggleHelper} disabled={s.isRunning}>
+                {s.showHelper ? "Hide helper" : "Show helper"}
+              </Button>
+              <Button variant="soft" onClick={() => props.onCopy(helperText)} disabled={s.isRunning}>
+                Copy helper prompt
+              </Button>
+            </div>
+
+            {s.showHelper && !s.isRunning ? (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 950 }}>Helper</div>
+                <div style={{ color: "var(--muted)", marginTop: 6 }}>Paste this into your helper/AI. Keep turns short.</div>
+                <pre
+                  style={{
+                    marginTop: 10,
+                    padding: 12,
+                    borderRadius: 14,
+                    border: "1px solid var(--border)",
+                    background: "rgba(255,255,255,0.7)",
+                    overflowX: "auto",
+                    whiteSpace: "pre-wrap",
+                    color: "rgba(15,23,42,0.82)",
+                    boxShadow: "var(--shadow-sm)",
+                  }}
                 >
-                  {s.showHelper ? "Hide helper" : "Show helper"}
-                </Button>
-              ) : null}
-            </div>
-            <div style={{ color: "var(--muted)", marginTop: 10, fontSize: 12 }}>
-              Helper stays hidden while running.
-            </div>
+                  {helperText}
+                </pre>
+              </div>
+            ) : null}
           </Card>
 
-          {!s.isRunning && s.showHelper ? (
-            <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 950 }}>Helper</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Button variant="soft" onClick={() => props.onCopy(helperBundle)}>
-                    Copy helper prompt
-                  </Button>
-                </div>
-              </div>
-
-              <div style={{ height: 10 }} />
-
-              <textarea readOnly value={helperBundle} rows={10} style={textareaStyleMono} />
-            </Card>
-          ) : null}
-
-          <Collapse title="Localize for your context" defaultOpen={false}>
-            <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-              <div style={{ color: "var(--muted)" }}>
-                Keep the same communicative goal, but adjust cultural details:
-              </div>
-              <ul style={{ margin: 0, marginTop: 10, paddingLeft: 18, color: "var(--muted)", display: "grid", gap: 8 }}>
-                <li><strong>Setting:</strong> street, market, office, village gathering, café, mosque courtyard, metro platform.</li>
-                <li><strong>Politeness:</strong> shorten or soften the script depending on Istanbul, Paris, PNG villages, Oman, or your local norms.</li>
-                <li><strong>Nonverbal cues:</strong> distance, eye contact, hand gestures, turn-taking.</li>
-                <li><strong>Vocabulary swap:</strong> bus/taxi, clerk/elder, clinic/pharmacy, card/cash.</li>
-              </ul>
-            </Card>
-          </Collapse>
-
-          {t.twists?.length ? (
-            <Collapse title="Twists" defaultOpen={false}>
-              <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-                <ul style={{ margin: 0, paddingLeft: 18, color: "var(--muted)", display: "grid", gap: 8 }}>
-                  {t.twists.map((x, idx) => (
-                    <li key={idx}>{x}</li>
-                  ))}
-                </ul>
-              </Card>
-            </Collapse>
-          ) : null}
+          <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15,23,42,0.02)" }}>
+            <div style={{ fontWeight: 950 }}>Localize for your context</div>
+            <div style={{ color: "var(--muted)", marginTop: 6 }}>Keep the purpose. Adjust the social rules.</div>
+            <ul style={{ margin: 0, marginTop: 10, paddingLeft: 18, color: "var(--muted)", display: "grid", gap: 8 }}>
+              <li>Istanbul: polite forms + tighter personal space in crowds.</li>
+              <li>Paris: quicker turn-taking; softer apologies; short confirmations.</li>
+              <li>PNG villages: names, kin terms, and respect cues matter more than speed.</li>
+              <li>Oman: modest tone; indirect requests; high respect for elders.</li>
+            </ul>
+          </Card>
         </div>
       </Collapse>
     </Card>
   );
 }
-
-/* =========================
-   Import builder (Home > Advanced)
-========================= */
-
-function ImportBuilder(props: {
-  defaultLevel: CEFRLevel;
-  defaultCategory: Category;
-  onImport: (templates: Template[]) => void;
-  onToast: (msg: string) => void;
-}) {
-  const [level, setLevel] = useState<CEFRLevel>(props.defaultLevel);
-  const [category, setCategory] = useState<Category>(props.defaultCategory);
-  const [partner, setPartner] = useState<Template["partner"]>("either");
-  const [situation, setSituation] = useState("");
-  const [correction, setCorrection] = useState("");
-  const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLevel(props.defaultLevel);
-  }, [props.defaultLevel]);
-
-  const aiPrompt = useMemo(() => {
-    const eq = LEVEL_EQUIV[level];
-    const cleanSituation = situation.trim() || "[Write the situation in one or two sentences.]";
-    const cleanCorrection = correction.trim();
-    const partnerLine = partner === "either" ? "Partner: Human or AI" : partner === "human" ? "Partner: Human" : "Partner: AI";
-
-    return [
-      "You are generating a FluentHour session template for language practice.",
-      "",
-      "Output must be EXACTLY in this format, with markers on their own lines:",
-      "BEGIN PERFECT HOUR SESSION",
-      "ID: " + `${level}-` + "XXXX (use any unique code)",
-      "Title: " + "[Short title for the situation]",
-      `Level: ${level} (${eq.actfl}; ${eq.clb})`,
-      partnerLine,
-      "Category: " + category,
-      "Goal (CLB): " + "[One can-do statement]",
-      "Context: " + cleanSituation,
-      cleanCorrection ? "Correction: " + cleanCorrection : "Correction: " + "[What errors should the helper recast?]",
-      "",
-      "PHASE 1",
-      "Name: Fluency loop",
-      "Minutes: 10",
-      "Purpose: " + "[Automate key phrases for this situation.]",
-      "Human steps:",
-      "* " + "[Four to six short bullet steps.]",
-      "AI helper script: " + "[One short paragraph to guide the helper.]",
-      "",
-      "PHASE 2",
-      "Name: Model and input",
-      "Minutes: 25",
-      "Purpose: " + "[Provide model lines and listening.]",
-      "Human steps:",
-      "* " + "[Four to six bullets.]",
-      "AI helper script: " + "[One short paragraph.]",
-      "",
-      "PHASE 3",
-      "Name: Simulation output",
-      "Minutes: 15",
-      "Purpose: " + "[Perform the situation with short turns.]",
-      "Human steps:",
-      "* " + "[Four to six bullets.]",
-      "AI helper script: " + "[One short paragraph.]",
-      "",
-      "PHASE 4",
-      "Name: Record and focus",
-      "Minutes: 10",
-      "Purpose: " + "[Record, listen, and pick one correction focus.]",
-      "Human steps:",
-      "* " + "[Three to five bullets.]",
-      "AI helper script: " + "[One short paragraph.]",
-      "",
-      "Twists:",
-      "* " + "[Five twist bullets.]",
-      "END PERFECT HOUR SESSION",
-      "",
-      "Return ONLY the session text. No commentary.",
-    ].join("\n");
-  }, [level, category, partner, situation, correction]);
-
-  function importFromTextAndSave() {
-    setImportError(null);
-    const parsed = parsePerfectHourText(importText, level, "imported");
-    if (!parsed.length) {
-      setImportError("No sessions found in the pasted text. Make sure it includes BEGIN/END markers.");
-      return;
-    }
-    props.onImport(parsed);
-    props.onToast("Imported");
-    setImportText("");
-    setSituation("");
-    setCorrection("");
-  }
-
-  return (
-    <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(15, 23, 42, 0.02)" }}>
-      <div style={{ fontWeight: 900 }}>Import your own sessions</div>
-      <div style={{ color: "var(--muted)", marginTop: 6 }}>
-        Copy the AI prompt, run it in your AI, then paste the result.
-      </div>
-
-      <div style={{ height: 12 }} />
-
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900 }}>Level</div>
-          <select value={level} onChange={(e) => setLevel(e.target.value as CEFRLevel)} style={inputStyle}>
-            {CEFR_LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {l} — {LEVEL_EQUIV[l].actfl} — {LEVEL_EQUIV[l].clb}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900 }}>Category</div>
-          <select value={category} onChange={(e) => setCategory(e.target.value as Category)} style={inputStyle}>
-            {CATEGORY_OPTIONS.filter((x) => x !== "Any").map((c) => (
-              <option key={c} value={c as any}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900 }}>Partner</div>
-          <select value={partner} onChange={(e) => setPartner(e.target.value as any)} style={inputStyle}>
-            <option value="either">Human or AI</option>
-            <option value="human">Human only</option>
-            <option value="ai">AI only</option>
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900 }}>Situation (one or two sentences)</div>
-          <textarea
-            value={situation}
-            onChange={(e) => setSituation(e.target.value)}
-            rows={3}
-            style={textareaStyle}
-            placeholder="Example: You accidentally bump into someone on a crowded street."
-          />
-        </div>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 900 }}>Correction focus (optional)</div>
-          <input
-            value={correction}
-            onChange={(e) => setCorrection(e.target.value)}
-            style={inputStyle}
-            placeholder='Example: Recast "Bad me" → "I’m sorry."'
-          />
-        </div>
-
-        <Button
-          variant="soft"
-          onClick={async () => props.onToast((await copyToClipboard(aiPrompt)) ? "AI prompt copied" : "Copy failed")}
-        >
-          Copy AI prompt
-        </Button>
-
-        <textarea readOnly value={aiPrompt} rows={10} style={textareaStyleMono} />
-
-        <div style={{ fontWeight: 900 }}>Paste AI result</div>
-        <textarea
-          value={importText}
-          onChange={(e) => {
-            setImportText(e.target.value);
-            setImportError(null);
-          }}
-          rows={10}
-          style={textareaStyleMono}
-          placeholder="Paste the session block(s) here…"
-        />
-
-        {importError ? (
-          <div style={{ color: "rgba(220, 38, 38, 0.92)" }}>
-            <strong>Import issue:</strong> {importError}
-          </div>
-        ) : null}
-
-        <Button variant="primary" onClick={importFromTextAndSave} disabled={!importText.trim()} full>
-          Import and save locally
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-/* =========================
-   UI components
-========================= */
-
-function Card(props: React.PropsWithChildren<{ style?: React.CSSProperties }>) {
-  return (
-    <div style={{ ...cardStyle, ...(props.style ?? {}) }}>
-      {props.children}
-    </div>
-  );
-}
-
-function Button(props: React.PropsWithChildren<{ onClick?: () => void; disabled?: boolean; full?: boolean; variant: "primary" | "soft" }>) {
-  const { variant } = props;
-  const style = variant === "primary" ? primaryButtonStyle : softButtonStyle;
-  return (
-    <button
-      onClick={props.onClick}
-      disabled={props.disabled}
-      style={{
-        ...style,
-        width: props.full ? "100%" : undefined,
-        opacity: props.disabled ? 0.55 : 1,
-        cursor: props.disabled ? "not-allowed" : "pointer",
-      }}
-    >
-      {props.children}
-    </button>
-  );
-}
-
-function Pill(props: React.PropsWithChildren<{}>) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: "1px solid var(--border)",
-        background: "rgba(255,255,255,0.6)",
-        boxShadow: "var(--shadow-sm)",
-        fontSize: 12,
-        color: "var(--muted)",
-      }}
-    >
-      {props.children}
-    </span>
-  );
-}
-
-function Collapse(props: React.PropsWithChildren<{ title: string; defaultOpen?: boolean }>) {
-  const [open, setOpen] = useState(!!props.defaultOpen);
-  return (
-    <div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          padding: "10px 12px",
-          borderRadius: 14,
-          border: "1px solid var(--border)",
-          background: "rgba(255,255,255,0.55)",
-          boxShadow: "var(--shadow-sm)",
-          cursor: "pointer",
-          fontWeight: 900,
-        }}
-      >
-        <span>{props.title}</span>
-        <span style={{ color: "var(--muted)", fontWeight: 800 }}>{open ? "Hide" : "Show"}</span>
-      </button>
-      {open ? <div style={{ marginTop: 10 }}>{props.children}</div> : null}
-    </div>
-  );
-}
-
-type MenuItem = { key: string; label: string; onSelect: () => void };
-
-function MenuButton(props: { label: string; items: MenuItem[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!open) return;
-      const el = ref.current;
-      if (!el) return;
-      if (e.target instanceof Node && !el.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          borderRadius: 999,
-          border: "1px solid var(--border)",
-          background: "rgba(255,255,255,0.70)",
-          padding: "10px 12px",
-          boxShadow: "var(--shadow-sm)",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontWeight: 900,
-          letterSpacing: "-0.01em",
-        }}
-      >
-        <span>{props.label}</span>
-        <span style={{ color: "var(--muted)", fontWeight: 900 }}>▾</span>
-      </button>
-
-      {open ? (
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 8px)",
-            minWidth: 260,
-            background: "rgba(255,255,255,0.92)",
-            border: "1px solid var(--border-strong)",
-            boxShadow: "var(--shadow-sm)",
-            borderRadius: 16,
-            boxShadow: "var(--shadow)",
-            backdropFilter: "blur(14px)",
-            padding: 6,
-            zIndex: 50,
-          }}
-        >
-          {props.items.map((it) => (
-            <button
-              key={it.key}
-              onClick={() => {
-                it.onSelect();
-                setOpen(false);
-              }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid transparent",
-                background: "transparent",
-                fontWeight: 850,
-              }}
-            >
-              <span>{it.label}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function LevelChecklistSheet(props: {
-  level: CEFRLevel;
-  templates: Template[];
-  completion: CompletionState;
-  onStartTemplate: (t: Template) => void;
-  onToggleComplete: (templateId: string) => void;
-  onClose: () => void;
-}) {
-  const list = useMemo(() => props.templates.filter((t) => t.level === props.level), [props.templates, props.level]);
-
-  const incomplete = useMemo(() => list.filter((t) => !props.completion.completedAtById[t.id]), [list, props.completion]);
-  const complete = useMemo(() => list.filter((t) => props.completion.completedAtById[t.id]), [list, props.completion]);
-
-  function Row({ t }: { t: Template }) {
-    const done = !!props.completion.completedAtById[t.id];
-    return (
-      <div
-        style={{
-          padding: 12,
-          borderRadius: 16,
-          border: "1px solid var(--border)",
-          background: "rgba(255,255,255,0.70)",
-          boxShadow: "var(--shadow-sm)",
-          display: "grid",
-          gridTemplateColumns: "34px 1fr",
-          gap: 10,
-          alignItems: "start",
-        }}
-      >
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            props.onToggleComplete(t.id);
-          }}
-          aria-label={done ? "Mark incomplete" : "Mark complete"}
-          title={done ? "Marked complete (click to undo)" : "Mark complete"}
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 12,
-            border: done ? "1px solid rgba(37, 99, 235, 0.35)" : "1px solid var(--border)",
-            background: done ? "rgba(37, 99, 235, 0.10)" : "rgba(255,255,255,0.9)",
-            boxShadow: "var(--shadow-sm)",
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ fontWeight: 950, color: done ? "rgba(37, 99, 235, 0.95)" : "rgba(15, 23, 42, 0.55)" }}>
-            {done ? "✓" : "◻"}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => props.onStartTemplate(t)}
-          style={{
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            textAlign: "left",
-            cursor: "pointer",
-            display: "grid",
-            gap: 6,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-            <div style={{ fontWeight: 950, letterSpacing: "-0.01em" }}>{t.title}</div>
-            <Pill style={{ fontSize: 12 }}>{t.category}</Pill>
-          </div>
-
-          <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.35 }}>
-            {t.context}
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Pill style={{ fontSize: 12 }}>{t.level}</Pill>
-            {done ? <Pill style={{ fontSize: 12 }}>Completed</Pill> : <Pill style={{ fontSize: 12 }}>Not completed</Pill>}
-          </div>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15, 23, 42, 0.22)",
-        backdropFilter: "blur(6px)",
-        zIndex: 60,
-        display: "flex",
-        justifyContent: "flex-end",
-      }}
-    >
-      <div
-        style={{
-          width: "min(560px, 94vw)",
-          height: "100%",
-          background: "rgba(255,255,255,0.92)",
-          borderLeft: "1px solid var(--border)",
-          boxShadow: "var(--shadow)",
-          padding: 16,
-          overflow: "auto",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontWeight: 980, fontSize: 18, letterSpacing: "-0.02em" }}>
-              {props.level} checklist
-            </div>
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>
-              Click a session to start it. Use the checkbox to restore progress.
-            </div>
-          </div>
-          <Button variant="soft" onClick={props.onClose}>
-            Close
-          </Button>
-        </div>
-
-        <div style={{ height: 12 }} />
-
-        <div style={{ display: "grid", gap: 10 }}>
-          {incomplete.length ? (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-                <div style={{ fontWeight: 950 }}>Up next</div>
-                <Pill style={{ fontSize: 12 }}>
-                  Incomplete: {incomplete.length}/{list.length}
-                </Pill>
-              </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {incomplete.map((t) => (
-                  <Row key={t.id} t={t} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <Card style={{ boxShadow: "var(--shadow-sm)", background: "rgba(37, 99, 235, 0.04)" }}>
-              <div style={{ fontWeight: 950 }}>All complete</div>
-              <div style={{ color: "var(--muted)", marginTop: 6 }}>You can repeat sessions for more hours and fluency.</div>
-            </Card>
-          )}
-
-          {complete.length ? (
-            <Collapse title={`Completed (${complete.length})`} defaultOpen={false}>
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {complete.map((t) => (
-                  <Row key={t.id} t={t} />
-                ))}
-              </div>
-            </Collapse>
-          ) : null}
-        </div>
-
-        <div style={{ height: 12 }} />
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Button variant="soft" onClick={props.onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Toast(props: { msg: string }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: "50%",
-        bottom: 22,
-        transform: "translateX(-50%)",
-        padding: "10px 12px",
-        borderRadius: 14,
-        border: "1px solid var(--border)",
-        background: "rgba(255,255,255,0.9)",
-        boxShadow: "var(--shadow-lg)",
-        fontWeight: 800,
-      }}
-    >
-      {props.msg}
-    </div>
-  );
-}
-
-/* =========================
-   Styles
-========================= */
-
-const cardStyle: React.CSSProperties = {
-  borderRadius: 18,
-  border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.72)",
-  boxShadow: "var(--shadow-lg)",
-  padding: 14,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(37, 99, 235, 0.25)",
-  background: "linear-gradient(180deg, rgba(37, 99, 235, 0.85), rgba(37, 99, 235, 0.65))",
-  color: "white",
-  borderRadius: 16,
-  padding: "12px 14px",
-  fontWeight: 950,
-  letterSpacing: "-0.01em",
-  boxShadow: "0 10px 30px rgba(37, 99, 235, 0.18), var(--shadow-sm)",
-};
-
-const softButtonStyle: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.6)",
-  color: "var(--text)",
-  borderRadius: 16,
-  padding: "10px 12px",
-  fontWeight: 900,
-  boxShadow: "var(--shadow-sm)",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 14,
-  border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.75)",
-  boxShadow: "var(--shadow-sm)",
-  outline: "none",
-  fontWeight: 700,
-};
-
-const textareaStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 14,
-  border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.75)",
-  boxShadow: "var(--shadow-sm)",
-  outline: "none",
-  fontWeight: 650,
-  lineHeight: 1.35,
-};
-
-const textareaStyleMono: React.CSSProperties = {
-  ...textareaStyle,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-  fontSize: 12,
-  whiteSpace: "pre-wrap",
-};
-
-const levelRowStyle: React.CSSProperties = {
-  width: "100%",
-  textAlign: "left",
-  padding: 12,
-  borderRadius: 18,
-  border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.55)",
-  boxShadow: "var(--shadow-sm)",
-  cursor: "pointer",
-};
