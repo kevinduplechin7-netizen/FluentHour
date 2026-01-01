@@ -594,6 +594,34 @@ function Pill(props: { children: React.ReactNode }) {
   );
 }
 
+function Toast(props: { message: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        left: "50%",
+        bottom: 18,
+        transform: "translateX(-50%)",
+        maxWidth: "min(560px, calc(100vw - 28px))",
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid rgba(15,23,42,0.12)",
+        background: "rgba(255,255,255,0.92)",
+        boxShadow: "var(--shadow)",
+        color: "var(--text)",
+        fontWeight: 650,
+        fontSize: 13,
+        zIndex: 50,
+        backdropFilter: "blur(8px)",
+      }}
+    >
+      {props.message}
+    </div>
+  );
+}
+
 /** Small, robust Error Boundary */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message?: string }> {
   constructor(props: any) {
@@ -845,6 +873,22 @@ export default function App() {
   const tickRef = useRef<number | null>(null);
   const runStartedAtRef = useRef<number | null>(null);
 
+  const [sessionLoggedMs, setSessionLoggedMs] = useState<number>(0);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = React.useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [showImport, setShowImport] = useState<boolean>(false);
   const [showLocalize, setShowLocalize] = useState<boolean>(false);
@@ -921,6 +965,8 @@ export default function App() {
     const elapsed = nowMs() - runStartedAtRef.current;
     runStartedAtRef.current = null;
     if (elapsed <= 0) return;
+
+    setSessionLoggedMs((ms) => ms + elapsed);
 
     setStore((st) => ({
       ...st,
@@ -1007,6 +1053,12 @@ export default function App() {
     setPhaseIdx(0);
     setPhaseDone({});
     setSessionEnded(false);
+    setSessionLoggedMs(0);
+    if (tickRef.current) {
+      window.clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+    runStartedAtRef.current = null;
     const first = session.phases[0];
     setSecondsLeft((first?.minutes || 0) * 60);
     setRunning(false);
@@ -1062,6 +1114,46 @@ export default function App() {
     }
     setRunning((r) => !r);
   }
+
+  function minsFromMs(ms: number) {
+    return Math.max(0, Math.round(ms / 60000));
+  }
+
+  function sessionLoggedMsNow() {
+    const pending = runStartedAtRef.current == null ? 0 : Math.max(0, nowMs() - runStartedAtRef.current);
+    return sessionLoggedMs + pending;
+  }
+
+  function returnHome(toastMsg?: string) {
+    // Log any in-flight running time (if present) before leaving the runner.
+    accumulateRunTime();
+    setRunning(false);
+    setActive(null);
+    setPhaseIdx(0);
+    setSecondsLeft(0);
+    setPhaseDone({});
+    setSessionEnded(false);
+    setShowAdvanced(false);
+    setShowLocalize(false);
+    setScreen("HOME");
+    if (toastMsg) showToast(toastMsg);
+  }
+
+  function finishSession() {
+    const pending = runStartedAtRef.current == null ? 0 : Math.max(0, nowMs() - runStartedAtRef.current);
+    const msThis = sessionLoggedMs + pending;
+    const totalAfter = formatHrs(progress.time.totalMs + pending);
+    returnHome(`Saved • +${minsFromMs(msThis)} min • Total ${totalAfter}h`);
+  }
+
+  function markCompleteAndReturn() {
+    const pending = runStartedAtRef.current == null ? 0 : Math.max(0, nowMs() - runStartedAtRef.current);
+    const msThis = sessionLoggedMs + pending;
+    const totalAfter = formatHrs(progress.time.totalMs + pending);
+    markSessionComplete();
+    returnHome(`Completed ✓ • +${minsFromMs(msThis)} min • Total ${totalAfter}h`);
+  }
+
 
   function markSessionComplete() {
     if (!active) return;
@@ -1598,12 +1690,11 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 40, fontWeight: 950, letterSpacing: "-0.04em" }}>{timeStr}</div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <SoftButton onClick={toggleRun}>{sessionEnded ? "Done" : running ? "Pause" : "Start"}</SoftButton>
+                <SoftButton onClick={sessionEnded ? finishSession : toggleRun}>{sessionEnded ? "Finish" : running ? "Pause" : "Start"}</SoftButton>
                 <SoftButton onClick={skipToNext} disabled={sessionEnded}>Skip to next</SoftButton>
                 <SoftButton
                   onClick={() => {
-                    setRunning(false);
-                    setScreen("HOME");
+                    finishSession();
                   }}
                 >
                   Exit
@@ -1618,9 +1709,37 @@ export default function App() {
             </div>
 
             {sessionEnded && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <SmallButton tone="primary" onClick={markSessionComplete}>Mark complete</SmallButton>
-                <span style={{ color: "var(--muted)", fontSize: 12 }}>Completion updates your path. Total hours always count.</span>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(37,99,235,0.22)",
+                  background: "rgba(37,99,235,0.06)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                    Logged this session: <b style={{ color: "var(--text)" }}>{minsFromMs(sessionLoggedMsNow())} min</b> (already added to your total)
+                  </div>
+                  {(progress.completedIdsByLevel[s.levelKey] || {})[s.id] && <Pill>Completed ✓</Pill>}
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  {(progress.completedIdsByLevel[s.levelKey] || {})[s.id] ? (
+                    <SmallButton tone="primary" onClick={finishSession}>Return home</SmallButton>
+                  ) : (
+                    <>
+                      <SmallButton tone="primary" onClick={markCompleteAndReturn}>Mark complete + return</SmallButton>
+                      <SmallButton onClick={finishSession}>Return without marking</SmallButton>
+                    </>
+                  )}
+                </div>
+
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  You’ll see your progress thermometer update immediately on the Home screen.
+                </div>
               </div>
             )}
           </div>
@@ -1772,6 +1891,8 @@ export default function App() {
           ]}
         />
       )}
+
+      {toast && <Toast message={toast} />}
 
       {screen === "HOME" ? home : sessionUI}
     </ErrorBoundary>
