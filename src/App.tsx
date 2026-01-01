@@ -21,18 +21,18 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const APP_NAME = "FluentHour";
 const APP_SUBTITLE = "Guided speaking practice • Canadian benchmarks";
 const APP_TAGLINE =
-  "Three hundred plus hours of guided speaking practice to level up your fluency. Set your goal, start at your level, and follow the steps with a language helper.";
+  "300+ hours of guided speaking practice to level up your fluency. Set your goal, start at your level, and follow the steps with a language helper.";
 
 type Screen = "HOME" | "SESSION";
 
 type LevelKey = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 const LEVELS: { key: LevelKey; label: string }[] = [
-  { key: "A1", label: "A one" },
-  { key: "A2", label: "A two" },
-  { key: "B1", label: "B one" },
-  { key: "B2", label: "B two" },
-  { key: "C1", label: "C one" },
-  { key: "C2", label: "C two" },
+  { key: "A1", label: "A1" },
+  { key: "A2", label: "A2" },
+  { key: "B1", label: "B1" },
+  { key: "B2", label: "B2" },
+  { key: "C1", label: "C1" },
+  { key: "C2", label: "C2" },
 ];
 
 type Mode = "path" | "random"; // path is default
@@ -348,9 +348,10 @@ function parseSessionBlock(block: string): Session | null {
           }
         }
       }
+      const idx = phases.length;
       phases.push({
-        name: name || `Phase ${phases.length + 1}`,
-        minutes: minutes || 0,
+        name: name || `Phase ${idx + 1}`,
+        minutes: minutes && minutes > 0 ? minutes : inferPhaseMinutes(name, idx),
         purpose: purpose || undefined,
         humanSteps,
         aiScript: aiScript || undefined,
@@ -384,6 +385,21 @@ function pickRandomWithVariety(list: Session[], recent: string[], maxRecent = 6)
   const candidates = list.filter((s) => !recentSet.has(s.id));
   const pool = candidates.length ? candidates : list;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function inferPhaseMinutes(name: string, idx: number) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("fluency")) return 10;
+  if (n.includes("model")) return 25;
+  if (n.includes("input")) return 25;
+  if (n.includes("simulation") || n.includes("output")) return 15;
+  if (n.includes("record")) return 10;
+  // fallback by phase index
+  if (idx === 0) return 10;
+  if (idx === 1) return 25;
+  if (idx === 2) return 15;
+  if (idx === 3) return 10;
+  return 15;
 }
 
 function msInDays(days: number) {
@@ -825,36 +841,43 @@ export default function App() {
     setSessions(deduped);
   }, [libraryText, activeProfile.userLibraryText, activeProfile.id]);
 
-  // Runner ticking
+  // Runner ticking (robust + counts study time while running)
+  const accumulateRunTime = React.useCallback(() => {
+    if (runStartedAtRef.current == null) return;
+    const elapsed = nowMs() - runStartedAtRef.current;
+    runStartedAtRef.current = null;
+    if (elapsed <= 0) return;
+
+    setStore((st) => ({
+      ...st,
+      profiles: st.profiles.map((p) => {
+        if (p.id !== st.activeId) return p;
+        return { ...p, progress: { ...p.progress, time: { ...p.progress.time, totalMs: p.progress.time.totalMs + elapsed } } };
+      }),
+    }));
+  }, []);
+
   useEffect(() => {
     if (!running) {
       if (tickRef.current) {
         window.clearInterval(tickRef.current);
         tickRef.current = null;
       }
-      if (runStartedAtRef.current != null) {
-        const elapsed = nowMs() - runStartedAtRef.current;
-        runStartedAtRef.current = null;
-        if (elapsed > 0) {
-          setStore((st) => {
-            const next = { ...st };
-            next.profiles = next.profiles.map((p) => {
-              if (p.id !== st.activeId) return p;
-              return { ...p, progress: { ...p.progress, time: { ...p.progress.time, totalMs: p.progress.time.totalMs + elapsed } } };
-            });
-            return next;
-          });
-        }
-      }
+      accumulateRunTime();
       return;
     }
 
+    if (tickRef.current) {
+      window.clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
     if (runStartedAtRef.current == null) runStartedAtRef.current = nowMs();
 
     tickRef.current = window.setInterval(() => {
       setSecondsLeft((sec) => {
         if (sec <= 1) {
-          window.setTimeout(() => setRunning(false), 0); // autopause at phase end
+          // autopause at phase end
+          window.setTimeout(() => setRunning(false), 0);
           return 0;
         }
         return sec - 1;
@@ -867,7 +890,7 @@ export default function App() {
         tickRef.current = null;
       }
     };
-  }, [running]);
+  }, [running, accumulateRunTime]);
 
   const currentLevelList = sessionsByLevel[progress.level] || [];
   const completedMap = progress.completedIdsByLevel[progress.level] || {};
@@ -1117,6 +1140,18 @@ export default function App() {
           <MenuButton label="Level" value={LEVELS.find((l) => l.key === progress.level)?.label || progress.level} onClick={() => setOpenLevelMenu(true)} />
           <MenuButton label="Mode" value={progress.mode === "path" ? "Path" : "Random"} onClick={() => setOpenModeMenu(true)} />
         </div>
+        <div style={{ maxWidth: 980, margin: "10px auto 0", padding: "0 2px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, color: "var(--muted)", fontSize: 12 }}>
+            <span>
+              <b style={{ color: "var(--text)" }}>{totalHours}</b> / <b style={{ color: "var(--text)" }}>{goalHours}</b> hours
+            </span>
+            <span style={{ fontWeight: 900 }}>{totalPct}%</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 999, background: "rgba(15,23,42,0.06)", overflow: "hidden", boxShadow: "var(--shadow-sm)", border: "1px solid rgba(15,23,42,0.06)" }}>
+            <div style={{ width: `${totalPct}%`, height: "100%", background: "linear-gradient(90deg, rgba(37,99,235,0.55), rgba(37,99,235,0.25))" }} />
+          </div>
+        </div>
+
       </div>
     </div>
   );
