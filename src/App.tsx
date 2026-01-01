@@ -19,9 +19,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
  */
 
 const APP_NAME = "FluentHour";
-const APP_SUBTITLE = "Guided speaking practice • Canadian benchmarks";
+const APP_SUBTITLE = "Guided speaking practice • CLB / ACTFL / CEFR‑informed";
 const APP_TAGLINE =
-  "300+ hours of guided speaking practice to level up your fluency. Set your goal, start at your level, and follow the steps with a language helper.";
+  "Guided speaking practice informed by Canadian Language Benchmarks (CLB), ACTFL, and CEFR. Set your goal hours, start at your level, and follow the steps with a language helper.";
+
 
 type Screen = "HOME" | "SESSION";
 
@@ -289,75 +290,148 @@ function parseSessionBlock(block: string): Session | null {
     }
   }
 
+  const inferPurpose = (name: string, idx: number) => {
+    const n = (name || "").toLowerCase();
+    if (n.includes("fluency")) return "Automate the key phrases with fast repetition.";
+    if (n.includes("model") || n.includes("input")) return "Hear a clean model, notice one feature, then repeat.";
+    if (n.includes("simulation") || n.includes("output")) return "Perform the interaction with short turns and gentle recasts.";
+    if (n.includes("record")) return "Record a short version, listen, and fix one thing.";
+    // fallback by phase index
+    if (idx === 0) return "Automate the key phrases with fast repetition.";
+    if (idx === 1) return "Hear a clean model, notice one feature, then repeat.";
+    if (idx === 2) return "Perform the interaction with short turns and gentle recasts.";
+    if (idx === 3) return "Record a short version, listen, and fix one thing.";
+    return undefined;
+  };
+
+  const parsePhaseHeader = (line: string) => {
+    // Supports:
+    // - "PHASE 1"
+    // - "PHASE 1: Fluency loop (10m)"
+    // - "PHASE 2: Model and input (20 minutes)"
+    const m = line.match(/^PHASE\s+(\d+)\s*(?::\s*(.+))?$/i);
+    const rest = (m?.[2] || "").trim();
+
+    let name = "";
+    let minutes = 0;
+
+    if (rest) {
+      const mm = rest.match(/\((\d+)\s*(?:m|min|mins|minute|minutes)\)/i);
+      if (mm?.[1]) {
+        const n = parseInt(mm[1], 10);
+        minutes = Number.isFinite(n) ? n : 0;
+      }
+      name = rest.replace(/\([^)]*\)/g, "").trim();
+    }
+
+    return { name, minutes };
+  };
+
   const phases: Phase[] = [];
   let i = 0;
+
   while (i < lines.length) {
     const line = lines[i].trim();
-    if (/^PHASE\s+\d+/i.test(line)) {
-      let name = "";
-      let minutes = 0;
-      let purpose = "";
-      const humanSteps: string[] = [];
-      let aiScript = "";
+    if (!/^PHASE\s+\d+/i.test(line)) {
       i++;
-      for (; i < lines.length; i++) {
-        const t = lines[i].trim();
-        if (/^PHASE\s+\d+/i.test(t) || t === "END PERFECT HOUR SESSION") {
-          i--;
-          break;
-        }
-        if (t.startsWith("Name:")) name = t.slice("Name:".length).trim();
-        else if (t.startsWith("Minutes:")) {
-          const n = parseInt(t.slice("Minutes:".length).trim(), 10);
-          minutes = Number.isFinite(n) ? n : minutes;
-        } else if (t.startsWith("Purpose:")) purpose = t.slice("Purpose:".length).trim();
-        else if (t === "Human steps:" || t === "Human steps") {
-          for (i = i + 1; i < lines.length; i++) {
-            const bl = lines[i].trim();
-            if (!bl) continue;
-            if (bl.startsWith("AI helper script:") || bl.startsWith("AI helper script")) {
-              i--;
-              break;
-            }
-            if (bl.startsWith("*")) humanSteps.push(bl.replace(/^\*\s*/, "").trim());
-            else if (bl.startsWith("-")) humanSteps.push(bl.replace(/^\-\s*/, "").trim());
-            else if (/^PHASE\s+\d+/i.test(bl) || bl === "END PERFECT HOUR SESSION") {
-              i--;
-              break;
-            } else humanSteps.push(bl);
-          }
-        } else if (t.startsWith("AI helper script:")) {
-          aiScript = t.slice("AI helper script:".length).trim();
-          for (i = i + 1; i < lines.length; i++) {
-            const nl = lines[i].trim();
-            if (!nl) continue;
-            if (/^PHASE\s+\d+/i.test(nl) || nl === "END PERFECT HOUR SESSION" || nl === "Twists:") {
-              i--;
-              break;
-            }
-            if (
-              nl.startsWith("Name:") ||
-              nl.startsWith("Minutes:") ||
-              nl.startsWith("Purpose:") ||
-              nl === "Human steps:"
-            ) {
-              i--;
-              break;
-            }
-            aiScript += " " + nl;
-          }
-        }
-      }
-      const idx = phases.length;
-      phases.push({
-        name: name || `Phase ${idx + 1}`,
-        minutes: minutes && minutes > 0 ? minutes : inferPhaseMinutes(name, idx),
-        purpose: purpose || undefined,
-        humanSteps,
-        aiScript: aiScript || undefined,
-      });
+      continue;
     }
-    i++;
+
+    const header = parsePhaseHeader(line);
+
+    let name = header.name;
+    let minutes = header.minutes;
+    let purpose = "";
+    const humanSteps: string[] = [];
+    let aiScript = "";
+
+    let j = i + 1;
+    let capturingAi = false;
+
+    const stopHere = (t: string) => {
+      return /^PHASE\s+\d+/i.test(t) || t === "END PERFECT HOUR SESSION" || t === "Twists:";
+    };
+
+    for (; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (!t) continue;
+      if (stopHere(t)) break;
+
+      // Structured format
+      if (t.startsWith("Name:")) {
+        name = t.slice("Name:".length).trim();
+        continue;
+      }
+      if (t.startsWith("Minutes:")) {
+        const n = parseInt(t.slice("Minutes:".length).trim(), 10);
+        minutes = Number.isFinite(n) ? n : minutes;
+        continue;
+      }
+      if (t.startsWith("Purpose:")) {
+        purpose = t.slice("Purpose:".length).trim();
+        continue;
+      }
+
+      // Human steps block (structured)
+      if (t === "Human steps:" || t === "Human steps") {
+        for (j = j + 1; j < lines.length; j++) {
+          const bl = lines[j].trim();
+          if (!bl) continue;
+          if (stopHere(bl) || bl.toLowerCase().startsWith("ai helper script")) {
+            j--; // let outer loop process the boundary/script line
+            break;
+          }
+          if (bl.startsWith("*")) humanSteps.push(bl.replace(/^\*\s*/, "").trim());
+          else if (bl.startsWith("-")) humanSteps.push(bl.replace(/^\-\s*/, "").trim());
+          else humanSteps.push(bl);
+        }
+        continue;
+      }
+
+      // AI helper script (both formats)
+      if (t.toLowerCase().startsWith("ai helper script:") || t.toLowerCase() === "ai helper script") {
+        capturingAi = true;
+        aiScript = t.includes(":") ? t.slice(t.indexOf(":") + 1).trim() : "";
+        continue;
+      }
+
+      // Continuation lines for AI script
+      if (capturingAi) {
+        // If a new field begins, stop capturing and re-process this line.
+        if (
+          t.startsWith("Name:") ||
+          t.startsWith("Minutes:") ||
+          t.startsWith("Purpose:") ||
+          t === "Human steps:" ||
+          t === "Human steps"
+        ) {
+          capturingAi = false;
+          j--;
+          continue;
+        }
+        aiScript += (aiScript ? " " : "") + t;
+        continue;
+      }
+
+      // Simple format: bullets directly under PHASE header are human steps
+      if (t.startsWith("*")) humanSteps.push(t.replace(/^\*\s*/, "").trim());
+      else if (t.startsWith("-")) humanSteps.push(t.replace(/^\-\s*/, "").trim());
+      else {
+        // non-bullet non-empty lines inside a phase are still actionable in this format
+        humanSteps.push(t);
+      }
+    }
+
+    const idx = phases.length;
+    phases.push({
+      name: name || `Phase ${idx + 1}`,
+      minutes: minutes && minutes > 0 ? minutes : inferPhaseMinutes(name, idx),
+      purpose: (purpose || inferPurpose(name, idx)) || undefined,
+      humanSteps,
+      aiScript: aiScript || undefined,
+    });
+
+    i = j;
   }
 
   return {
