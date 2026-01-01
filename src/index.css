@@ -147,3 +147,343 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* ===========================================
+   RESPONSIVE LAYOUT UTILITIES
+   =========================================== */
+
+/* Main container - constrained width with responsive padding */
+.fh-container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .fh-container {
+    padding: 10px;
+    gap: 10px;
+  }
+}
+
+/* Header layout - responsive stacking */
+.fh-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 14px 14px 10px;
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(255, 255, 255, 0.40) 60%, rgba(255, 255, 255, 0.0));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 640px) {
+  .fh-header {
+    padding: 10px 10px 8px;
+  }
+}
+
+.fh-header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Desktop: single row layout */
+@media (min-width: 769px) {
+  .fh-header-inner {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+}
+
+/* Header top row: brand + controls */
+.fh-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 769px) {
+  .fh-header-top {
+    flex: 1;
+  }
+}
+
+/* Header controls cluster (dropdowns) */
+.fh-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .fh-header-controls {
+    gap: 6px;
+  }
+}
+
+/* Progress section in header */
+.fh-header-progress {
+  width: 100%;
+  padding: 0 2px;
+}
+
+@media (min-width: 769px) {
+  .fh-header-progress {
+    max-width: 240px;
+    width: auto;
+    flex-shrink: 0;
+  }
+}
+
+/* Progress bar text row */
+.fh-progress-text {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+/* Progress bar track */
+.fh-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+/* MenuButton responsive sizing */
+.fh-menu-button {
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(37, 99, 235, 0.20);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.12), rgba(255, 255, 255, 0.62));
+  box-shadow: var(--shadow-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .fh-menu-button {
+    padding: 8px 10px;
+    gap: 6px;
+    font-size: 13px;
+  }
+}
+
+/* Brand/logo section */
+.fh-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .fh-brand {
+    gap: 8px;
+  }
+
+  .fh-brand-icon {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
+  }
+
+  .fh-brand-title {
+    font-size: 16px !important;
+  }
+
+  .fh-brand-subtitle {
+    font-size: 10px !important;
+  }
+}
+
+/* Card responsive padding */
+.fh-card {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 14px;
+}
+
+@media (max-width: 480px) {
+  .fh-card {
+    padding: 12px;
+  }
+}
+
+.fh-card--subtle {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--border);
+}
+
+/* Card header row */
+.fh-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .fh-card-header {
+    gap: 8px;
+  }
+}
+
+/* Primary action button - full width with breathing room */
+.fh-primary-button {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.08));
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  min-height: 52px;
+}
+
+@media (max-width: 480px) {
+  .fh-primary-button {
+    padding: 16px;
+    min-height: 56px;
+    font-size: 15px;
+  }
+}
+
+/* Pill badges */
+.fh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.75);
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.75);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .fh-pill {
+    padding: 5px 8px;
+    font-size: 11px;
+    gap: 6px;
+  }
+}
+
+/* Stats row in cards */
+.fh-stats-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .fh-stats-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+}
+
+/* Utility: prevent text overflow */
+.fh-text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Utility: responsive text */
+.fh-text-muted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 480px) {
+  .fh-text-muted {
+    font-size: 12px;
+  }
+}
+
+/* Session runner timer */
+.fh-timer {
+  font-size: 40px;
+  font-weight: 950;
+  letter-spacing: -0.04em;
+}
+
+@media (max-width: 480px) {
+  .fh-timer {
+    font-size: 32px;
+  }
+}
+
+/* Button groups - wrap on mobile */
+.fh-button-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .fh-button-group {
+    gap: 8px;
+  }
+}
+
+/* Modal sheet responsive */
+.fh-modal-panel {
+  width: min(560px, 92vw);
+  height: 100%;
+  background: rgba(255, 255, 255, 0.86);
+  border-left: 1px solid rgba(15, 23, 42, 0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 16px;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.30);
+  overflow: auto;
+}
+
+@media (max-width: 480px) {
+  .fh-modal-panel {
+    width: 100vw;
+    padding: 12px;
+    border-left: none;
+  }
+}

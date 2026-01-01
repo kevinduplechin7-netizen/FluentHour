@@ -484,19 +484,11 @@ function Card(props: { title?: string; children: React.ReactNode; right?: React.
   const { title, children, right, subtle, style } = props;
   return (
     <div
-      style={{
-        background: subtle ? "rgba(255,255,255,0.72)" : "var(--card)",
-        border: `1px solid ${subtle ? "var(--border)" : "var(--border-strong)"}`,
-        borderRadius: "var(--radius)",
-        boxShadow: "var(--shadow-sm)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
-        padding: 14,
-        ...style,
-      }}
+      className={`fh-card ${subtle ? "fh-card--subtle" : ""}`}
+      style={style}
     >
       {(title || right) && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+        <div className="fh-card-header">
           {title ? <div style={{ fontWeight: 700, letterSpacing: "-0.01em" }}>{title}</div> : <div />}
           {right}
         </div>
@@ -507,22 +499,11 @@ function Card(props: { title?: string; children: React.ReactNode; right?: React.
 }
 
 function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { children: React.ReactNode }) {
-  const { children, style, ...rest } = props;
+  const { children, className, ...rest } = props;
   return (
     <button
       {...rest}
-      style={{
-        width: "100%",
-        padding: "14px 16px",
-        borderRadius: "var(--radius)",
-        border: "1px solid rgba(37,99,235,0.22)",
-        background: "linear-gradient(180deg, rgba(37,99,235,0.14), rgba(37,99,235,0.08))",
-        boxShadow: "var(--shadow)",
-        color: "var(--text)",
-        fontWeight: 800,
-        letterSpacing: "-0.01em",
-        ...style,
-      }}
+      className={`fh-primary-button ${className || ""}`}
     >
       {children}
     </button>
@@ -575,20 +556,7 @@ function SmallButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { ch
 
 function Pill(props: { children: React.ReactNode }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: "1px solid var(--border)",
-        background: "rgba(255,255,255,0.75)",
-        fontWeight: 650,
-        color: "rgba(15,23,42,0.75)",
-        fontSize: 12,
-      }}
-    >
+    <span className="fh-pill">
       {props.children}
     </span>
   );
@@ -670,20 +638,8 @@ function ModalSheet(props: { open: boolean; onClose: () => void; title: string; 
         zIndex: 50,
       }}
     >
-      <div
-        style={{
-          width: "min(560px, 92vw)",
-          height: "100%",
-          background: "rgba(255,255,255,0.86)",
-          borderLeft: "1px solid rgba(15,23,42,0.10)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          padding: 16,
-          boxShadow: "0 30px 90px rgba(15,23,42,0.30)",
-          overflow: "auto",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+      <div className="fh-modal-panel">
+        <div className="fh-card-header" style={{ marginBottom: 12 }}>
           <div style={{ fontWeight: 950, letterSpacing: "-0.02em" }}>{title}</div>
           <SoftButton onClick={onClose} aria-label="Close">
             Close
@@ -698,18 +654,8 @@ function ModalSheet(props: { open: boolean; onClose: () => void; title: string; 
 function MenuButton(props: { label: string; value: string; onClick: () => void }) {
   return (
     <button
+      className="fh-menu-button"
       onClick={props.onClick}
-      style={{
-        padding: "10px 12px",
-        borderRadius: 999,
-        border: "1px solid rgba(37,99,235,0.20)",
-        background: "linear-gradient(180deg, rgba(37,99,235,0.12), rgba(255,255,255,0.62))",
-        boxShadow: "var(--shadow-sm)",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 10,
-        fontWeight: 850,
-      }}
     >
       <span style={{ color: "rgba(15,23,42,0.70)", fontWeight: 900 }}>{props.label}</span>
       <span>{props.value}</span>
@@ -1258,8 +1204,9 @@ export default function App() {
   }
 
   const premiumMark = (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div className="fh-brand">
       <div
+        className="fh-brand-icon"
         aria-hidden="true"
         style={{
           width: 36,
@@ -1279,45 +1226,34 @@ export default function App() {
         FH
       </div>
       <div>
-        <div style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
-        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
+        <div className="fh-brand-title" style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
+        <div className="fh-brand-subtitle" style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
       </div>
     </div>
   );
 
   const header = (
-    <div
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 10,
-        padding: "14px 14px 10px",
-        background:
-          "linear-gradient(180deg, rgba(37,99,235,0.18), rgba(255,255,255,0.40) 60%, rgba(255,255,255,0.0))",
-        backdropFilter: "blur(14px)",
-        WebkitBackdropFilter: "blur(14px)",
-        borderBottom: "1px solid rgba(15,23,42,0.08)",
-      }}
-    >
-      <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        {premiumMark}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <MenuButton label="Language" value={activeProfile.name} onClick={() => setOpenLangMenu(true)} />
-          <MenuButton label="Level" value={LEVELS.find((l) => l.key === progress.level)?.label || progress.level} onClick={() => setOpenLevelMenu(true)} />
-          <MenuButton label="Mode" value={progress.mode === "path" ? "Path" : "Random"} onClick={() => setOpenModeMenu(true)} />
+    <div className="fh-header">
+      <div className="fh-header-inner">
+        <div className="fh-header-top">
+          {premiumMark}
+          <div className="fh-header-controls">
+            <MenuButton label="Language" value={activeProfile.name} onClick={() => setOpenLangMenu(true)} />
+            <MenuButton label="Level" value={LEVELS.find((l) => l.key === progress.level)?.label || progress.level} onClick={() => setOpenLevelMenu(true)} />
+            <MenuButton label="Mode" value={progress.mode === "path" ? "Path" : "Random"} onClick={() => setOpenModeMenu(true)} />
+          </div>
         </div>
-        <div style={{ maxWidth: 980, margin: "10px auto 0", padding: "0 2px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, color: "var(--muted)", fontSize: 12 }}>
+        <div className="fh-header-progress">
+          <div className="fh-progress-text">
             <span>
               <b style={{ color: "var(--text)" }}>{totalHours}</b> / <b style={{ color: "var(--text)" }}>{goalHours}</b> hours
             </span>
             <span style={{ fontWeight: 900 }}>{totalPct}%</span>
           </div>
-          <div style={{ height: 10, borderRadius: 999, background: "rgba(15,23,42,0.06)", overflow: "hidden", boxShadow: "var(--shadow-sm)", border: "1px solid rgba(15,23,42,0.06)" }}>
+          <div className="fh-progress-bar">
             <div style={{ width: `${totalPct}%`, height: "100%", background: "linear-gradient(90deg, rgba(37,99,235,0.55), rgba(37,99,235,0.25))" }} />
           </div>
         </div>
-
       </div>
     </div>
   );
@@ -1330,21 +1266,21 @@ export default function App() {
 
   const home = (
     <>
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+      <div className="fh-container">
         <Card
           style={{ background: "rgba(255,255,255,0.78)" }}
           title="Your fluency goal"
           right={<Pill>{totalHours} hours • {totalPct}%</Pill>}
         >
-          <div style={{ color: "var(--muted)", marginBottom: 10 }}>{APP_TAGLINE}</div>
-          <div style={{ height: 10, borderRadius: 999, background: "rgba(15,23,42,0.06)", overflow: "hidden" }}>
+          <div className="fh-text-muted" style={{ marginBottom: 10 }}>{APP_TAGLINE}</div>
+          <div className="fh-progress-bar">
             <div style={{ width: `${totalPct}%`, height: "100%", background: "rgba(37,99,235,0.40)" }} />
           </div>
-          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+          <div className="fh-stats-row">
+            <div className="fh-text-muted">
               Total: <b style={{ color: "var(--text)" }}>{totalHours}</b> of <b style={{ color: "var(--text)" }}>{goalHours}</b> hours
             </div>
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+            <div className="fh-text-muted">
               Level {progress.level}: <b style={{ color: "var(--text)" }}>{completedCount}</b> of <b style={{ color: "var(--text)" }}>{totalCount}</b> completed
             </div>
           </div>
@@ -1352,7 +1288,7 @@ export default function App() {
 
         {needsBackup && (
           <Card title="Backup reminder" subtle right={<SmallButton tone="primary" onClick={exportBackup}>Export</SmallButton>}>
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>Export a weekly backup so you never lose your progress.</div>
+            <div className="fh-text-muted">Export a weekly backup so you never lose your progress.</div>
           </Card>
         )}
 
@@ -1361,7 +1297,7 @@ export default function App() {
         </PrimaryButton>
 
         <Card title="Your path" right={<SmallButton onClick={() => setLevelSheet(progress.level)}>Checklist</SmallButton>}>
-          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8 }}>
+          <div className="fh-text-muted" style={{ marginBottom: 8 }}>
             {progress.mode === "path" ? "Continue in order. Mark complete at the end." : "Random practice inside your selected level."}
           </div>
           {nextUp ? (
@@ -1674,22 +1610,22 @@ export default function App() {
     const situation = s.context || "Practice a realistic situation for your level.";
 
     return (
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: 14, display: "grid", gap: 12 }}>
+      <div className="fh-container">
         <Card
           title={s.title}
           right={
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div className="fh-button-group" style={{ justifyContent: "flex-end" }}>
               <Pill>{s.levelKey}</Pill>
               <Pill>{progress.partner === "human" ? "Language helper" : "AI helper"}</Pill>
               <Pill>{activeProfile.name}</Pill>
             </div>
           }
         >
-          <div style={{ color: "var(--muted)", fontSize: 12 }}>{s.levelRaw || ""}</div>
+          <div className="fh-text-muted">{s.levelRaw || ""}</div>
           <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 40, fontWeight: 950, letterSpacing: "-0.04em" }}>{timeStr}</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="fh-timer">{timeStr}</div>
+              <div className="fh-button-group">
                 <SoftButton onClick={sessionEnded ? finishSession : toggleRun}>{sessionEnded ? "Finish" : running ? "Pause" : "Start"}</SoftButton>
                 <SoftButton onClick={skipToNext} disabled={sessionEnded}>Skip to next</SoftButton>
                 <SoftButton
@@ -1702,7 +1638,7 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="fh-button-group">
               {s.phases.map((p, idx) => (
                 <Pill key={idx}>{idx === phaseIdx ? <b>Now</b> : phaseDone[idx] ? "Done" : "Next"}: {p.minutes}m</Pill>
               ))}
@@ -1719,14 +1655,14 @@ export default function App() {
                   background: "rgba(37,99,235,0.06)",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                <div className="fh-stats-row" style={{ marginTop: 0 }}>
+                  <div className="fh-text-muted">
                     Logged this session: <b style={{ color: "var(--text)" }}>{minsFromMs(sessionLoggedMsNow())} min</b> (already added to your total)
                   </div>
                   {(progress.completedIdsByLevel[s.levelKey] || {})[s.id] && <Pill>Completed ✓</Pill>}
                 </div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div className="fh-button-group">
                   {(progress.completedIdsByLevel[s.levelKey] || {})[s.id] ? (
                     <SmallButton tone="primary" onClick={finishSession}>Return home</SmallButton>
                   ) : (
@@ -1737,8 +1673,8 @@ export default function App() {
                   )}
                 </div>
 
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                  You’ll see your progress thermometer update immediately on the Home screen.
+                <div className="fh-text-muted">
+                  You'll see your progress thermometer update immediately on the Home screen.
                 </div>
               </div>
             )}
