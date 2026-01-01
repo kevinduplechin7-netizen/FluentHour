@@ -779,7 +779,6 @@ export default function App() {
   }, [running]);
 
   const currentLevelList = sessionsByLevel[state.level] || [];
-  const pathSorted = useMemo(() => sortSessionsForPath(currentLevelList), [currentLevelList]);
   const completedMap = state.completedIdsByLevel[state.level] || {};
   const completedCount = Object.keys(completedMap).length;
   const totalCount = currentLevelList.length;
@@ -1242,8 +1241,6 @@ export default function App() {
     const s = active;
     if (!s) return null;
     const phase = s.phases[phaseIdx];
-    const totalSeconds = (phase?.minutes || 0) * 60;
-    const done = phaseDone[phaseIdx] === true;
 
     const mm = Math.floor(secondsLeft / 60);
     const ss = secondsLeft % 60;
