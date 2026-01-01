@@ -31,6 +31,12 @@ const LEVELS: { key: LevelKey; label: string }[] = [
   { key: "C2", label: "C two" },
 ];
 
+const LEVEL_ORDER: LevelKey[] = ["A1", "A2", "B1", "B2", "C1", "C2"]; 
+
+function levelLabel(k: LevelKey) {
+  return LEVELS.find((l) => l.key === k)?.label || k;
+}
+
 type Mode = "random" | "path";
 type PartnerMode = "human" | "ai";
 
@@ -153,7 +159,7 @@ function makeDefaultState(): ProgressState {
   };
   return {
     level: "A2",
-    mode: "random",
+    mode: "path",
     partner: "human",
     focusCategory: "General",
     recentIdsByLevel: emptyRecent,
@@ -661,6 +667,12 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("HOME");
   const [state, setState] = useState<ProgressState>(() => loadState());
 
+  // Brand the browser tab
+  useEffect(() => {
+    document.title = APP_NAME;
+  }, []);
+
+
   const [libraryText, setLibraryText] = useState<string>("");
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState<boolean>(true);
@@ -793,6 +805,40 @@ export default function App() {
     return { total, done, pct: percent(done, total) };
   };
 
+  const nextPathTarget = useMemo(() => {
+    const startAt = Math.max(0, LEVEL_ORDER.indexOf(state.level));
+
+    for (let li = startAt; li < LEVEL_ORDER.length; li++) {
+      const lvl = LEVEL_ORDER[li];
+      const lvlList = sessionsByLevel[lvl] || [];
+      if (!lvlList.length) continue;
+
+      const sorted = sortSessionsForPath(lvlList);
+      const doneMap = state.completedIdsByLevel[lvl] || {};
+      const idxNext = sorted.findIndex((s) => !doneMap[s.id]);
+
+      if (idxNext >= 0) {
+        return {
+          level: lvl,
+          session: sorted[idxNext],
+          idxNext,
+          total: sorted.length,
+          done: sorted.length - sorted.filter((s) => !doneMap[s.id]).length,
+        };
+      }
+    }
+
+    // Fully complete: restart from first available level
+    for (const lvl of LEVEL_ORDER) {
+      const lvlList = sessionsByLevel[lvl] || [];
+      if (!lvlList.length) continue;
+      const sorted = sortSessionsForPath(lvlList);
+      return { level: lvl, session: sorted[0], idxNext: 0, total: sorted.length, done: 0 };
+    }
+
+    return null;
+  }, [state.level, sessionsByLevel, state.completedIdsByLevel]);
+
   function startSession(session: Session) {
     setActive(session);
     setScreen("SESSION");
@@ -810,10 +856,34 @@ export default function App() {
     const list = sessionsByLevel[state.level] || [];
     if (!list.length) return;
     if (state.mode === "path") {
-      const sorted = sortSessionsForPath(list);
-      const done = state.completedIdsByLevel[state.level] || {};
-      const next = sorted.find((s) => !done[s.id]) || sorted[0];
-      startSession(next);
+      // Journey path: continue through uncompleted sessions, then advance to the next level with content.
+      const startAt = Math.max(0, LEVEL_ORDER.indexOf(state.level));
+      for (let li = startAt; li < LEVEL_ORDER.length; li++) {
+        const lvl = LEVEL_ORDER[li];
+        const lvlList = sessionsByLevel[lvl] || [];
+        if (!lvlList.length) continue;
+
+        const sorted = sortSessionsForPath(lvlList);
+        const doneMap = state.completedIdsByLevel[lvl] || {};
+        const next = sorted.find((s) => !doneMap[s.id]);
+
+        if (next) {
+          if (lvl !== state.level) {
+            setState((s) => ({ ...s, level: lvl }));
+          }
+          startSession(next);
+          return;
+        }
+      }
+
+      // If everything is complete, restart from the first available level.
+      for (const lvl of LEVEL_ORDER) {
+        const lvlList = sessionsByLevel[lvl] || [];
+        if (!lvlList.length) continue;
+        if (lvl !== state.level) setState((s) => ({ ...s, level: lvl }));
+        startSession(sortSessionsForPath(lvlList)[0]);
+        return;
+      }
       return;
     }
     // random
@@ -918,9 +988,30 @@ export default function App() {
       }}
     >
       <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
-          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            aria-hidden
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 14,
+              background:
+                "radial-gradient(18px 18px at 30% 25%, rgba(255,255,255,0.55), transparent 60%), linear-gradient(135deg, rgba(37,99,235,0.95), rgba(15,23,42,0.92))",
+              boxShadow: "var(--shadow-sm)",
+              border: "1px solid rgba(255,255,255,0.25)",
+              display: "grid",
+              placeItems: "center",
+              color: "white",
+              fontWeight: 950,
+              letterSpacing: "-0.04em",
+            }}
+          >
+            FH
+          </div>
+          <div>
+            <div style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
+            <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <MenuButton
@@ -960,8 +1051,37 @@ export default function App() {
           </div>
         </Card>
 
+        {state.mode === "path" && nextPathTarget && (
+          <Card title="Your path" subtle>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                <div style={{ fontWeight: 700 }}>
+                  Next up: <span style={{ color: "var(--muted)", fontWeight: 700 }}>{levelLabel(nextPathTarget.level)}</span>
+                </div>
+                <div style={{ color: "var(--muted)" }}>
+                  Lesson {nextPathTarget.idxNext + 1} of {nextPathTarget.total}
+                </div>
+              </div>
+              <div style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, lineHeight: 1.25 }}>
+                {nextPathTarget.session.title}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <SmallButton
+                  onClick={() => {
+                    setState((s) => ({ ...s, level: nextPathTarget.level }));
+                    setLevelSheet(nextPathTarget.level);
+                  }}
+                >
+                  View checklist
+                </SmallButton>
+                <Pill tone="info">Auto-advances levels</Pill>
+              </div>
+            </div>
+          </Card>
+        )}
+
         <PrimaryButton onClick={chooseAndStart} disabled={loadingLibrary || !!libraryError || !currentLevelList.length}>
-          Start my fluent hour
+          {state.mode === "path" ? "Continue my fluent hour" : "Start a random fluent hour"}
         </PrimaryButton>
 
         {(loadingLibrary || libraryError) && (
@@ -999,7 +1119,10 @@ export default function App() {
               return (
                 <button
                   key={lvl.key}
-                  onClick={() => setState((s) => ({ ...s, level: lvl.key }))}
+                  onClick={() => {
+                    setState((s) => ({ ...s, level: lvl.key }));
+                    setLevelSheet(lvl.key);
+                  }}
                   style={{
                     textAlign: "left",
                     padding: "12px 12px",
@@ -1196,7 +1319,11 @@ export default function App() {
                         {done ? "✓" : ""}
                       </button>
                       <button
-                        onClick={() => startSession(s)}
+                        onClick={() => {
+                          setState((st) => ({ ...st, level: (levelSheet as LevelKey) }));
+                          setLevelSheet(null);
+                          startSession(s);
+                        }}
                         style={{
                           textAlign: "left",
                           padding: 0,
