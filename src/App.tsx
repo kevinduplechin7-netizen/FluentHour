@@ -1,17 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * FluentHour — Premium, local-first, two-screen app.
- * HOME: pick level + mode, see progress, start a session
- * SESSION: run the phases with autopause, mark complete at end
+ * FluentHour — premium, local-first, two-screen app.
  *
- * Library file (recommended):
- *   public/library/perfect-hour-data.txt  -> fetched at /library/perfect-hour-data.txt
+ * HOME
+ *  - One primary action: Start my fluent hour (Path by default)
+ *  - Level + Mode are dropdown buttons
+ *  - Multi-language profiles (one set of progress per language)
+ *  - Hours goal + completion tracking
+ *  - Checklist sheet: click a session to start; checkbox to toggle completion
+ *  - Backup export/import + weekly reminder (advanced)
  *
- * Data blocks:
- *   BEGIN PERFECT HOUR SESSION
- *   ...
- *   END PERFECT HOUR SESSION
+ * SESSION (Runner)
+ *  - Timer card (Start/Pause, autopause at phase end, Skip to next counts as done)
+ *  - Learner card (situation summary + steps + purpose)
+ *  - Helper card hidden while running; shows only when paused (Advanced)
+ *  - Localize card (collapsed by default)
  */
 
 const APP_NAME = "FluentHour";
@@ -31,13 +35,7 @@ const LEVELS: { key: LevelKey; label: string }[] = [
   { key: "C2", label: "C two" },
 ];
 
-const LEVEL_ORDER: LevelKey[] = ["A1", "A2", "B1", "B2", "C1", "C2"]; 
-
-function levelLabel(k: LevelKey) {
-  return LEVELS.find((l) => l.key === k)?.label || k;
-}
-
-type Mode = "random" | "path";
+type Mode = "path" | "random"; // path is default
 type PartnerMode = "human" | "ai";
 
 type FocusCategory =
@@ -78,7 +76,7 @@ type Phase = {
 };
 
 type Session = {
-  id: string; // stable identifier (ID: if present, else derived)
+  id: string;
   title: string;
   levelKey: LevelKey;
   levelRaw?: string;
@@ -88,9 +86,7 @@ type Session = {
   correction?: string;
   twists: string[];
   phases: Phase[];
-  // optional focus category for user-generated sessions
   category?: FocusCategory;
-  // raw block for debugging
   _raw?: string;
 };
 
@@ -107,9 +103,23 @@ type ProgressState = {
   recentIdsByLevel: Record<LevelKey, string[]>;
   completedIdsByLevel: Record<LevelKey, Record<string, true>>;
   time: TimeState;
+  lastBackupAtMs?: number;
+  nextBackupAtMs?: number;
 };
 
-const LS_KEY = "fluenthour.state.v2";
+type Profile = {
+  id: string;
+  name: string; // e.g., "French", "Arabic", "Greek"
+  progress: ProgressState;
+  userLibraryText?: string; // optional imported sessions (BEGIN/END blocks)
+};
+
+type ProfilesStore = {
+  activeId: string;
+  profiles: Profile[];
+};
+
+const LS_KEY = "fluenthour.profiles.v1";
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
@@ -130,7 +140,6 @@ function nowMs() {
 
 function formatHrs(ms: number) {
   const hours = ms / 3600000;
-  // one decimal, but avoid "-0.0"
   const rounded = Math.max(0, Math.round(hours * 10) / 10);
   return rounded;
 }
@@ -140,59 +149,70 @@ function percent(n: number, d: number) {
   return Math.round((n / d) * 100);
 }
 
-function makeDefaultState(): ProgressState {
-  const emptyRecent: Record<LevelKey, string[]> = {
-    A1: [],
-    A2: [],
-    B1: [],
-    B2: [],
-    C1: [],
-    C2: [],
-  };
-  const emptyCompleted: Record<LevelKey, Record<string, true>> = {
-    A1: {},
-    A2: {},
-    B1: {},
-    B2: {},
-    C1: {},
-    C2: {},
-  };
+function makeEmptyRecent(): Record<LevelKey, string[]> {
+  return { A1: [], A2: [], B1: [], B2: [], C1: [], C2: [] };
+}
+
+function makeEmptyCompleted(): Record<LevelKey, Record<string, true>> {
+  return { A1: {}, A2: {}, B1: {}, B2: {}, C1: {}, C2: {} };
+}
+
+function makeDefaultProgress(): ProgressState {
   return {
     level: "A2",
     mode: "path",
     partner: "human",
     focusCategory: "General",
-    recentIdsByLevel: emptyRecent,
-    completedIdsByLevel: emptyCompleted,
+    recentIdsByLevel: makeEmptyRecent(),
+    completedIdsByLevel: makeEmptyCompleted(),
     time: { totalMs: 0, goalHours: 300 },
+    lastBackupAtMs: undefined,
+    nextBackupAtMs: undefined,
   };
 }
 
-function loadState(): ProgressState {
-  const parsed = safeJsonParse<ProgressState>(localStorage.getItem(LS_KEY));
-  if (!parsed) return makeDefaultState();
-  // merge with defaults to handle new keys
-  const def = makeDefaultState();
-  return {
-    ...def,
-    ...parsed,
-    recentIdsByLevel: { ...def.recentIdsByLevel, ...(parsed.recentIdsByLevel || {}) },
-    completedIdsByLevel: { ...def.completedIdsByLevel, ...(parsed.completedIdsByLevel || {}) },
-    time: { ...def.time, ...(parsed.time || {}) },
+function makeDefaultStore(): ProfilesStore {
+  const p: Profile = {
+    id: "p_default",
+    name: "My language",
+    progress: makeDefaultProgress(),
+    userLibraryText: "",
   };
+  return { activeId: p.id, profiles: [p] };
 }
 
-function saveState(s: ProgressState) {
-  localStorage.setItem(LS_KEY, JSON.stringify(s));
+function loadStore(): ProfilesStore {
+  const parsed = safeJsonParse<ProfilesStore>(localStorage.getItem(LS_KEY));
+  if (!parsed || !parsed.profiles?.length) return makeDefaultStore();
+  const defProgress = makeDefaultProgress();
+
+  const profiles = parsed.profiles.map((p) => ({
+    ...p,
+    name: p.name || "My language",
+    progress: {
+      ...defProgress,
+      ...(p.progress || {}),
+      recentIdsByLevel: { ...makeEmptyRecent(), ...((p.progress as any)?.recentIdsByLevel || {}) },
+      completedIdsByLevel: { ...makeEmptyCompleted(), ...((p.progress as any)?.completedIdsByLevel || {}) },
+      time: { ...defProgress.time, ...((p.progress as any)?.time || {}) },
+    },
+    userLibraryText: p.userLibraryText || "",
+  }));
+  const activeId = profiles.some((p) => p.id === parsed.activeId) ? parsed.activeId : profiles[0].id;
+  return { activeId, profiles };
 }
 
-/** Robust fetch: Vite/Netlify may serve index.html for missing assets. Detect and reject HTML. */
+function saveStore(store: ProfilesStore) {
+  localStorage.setItem(LS_KEY, JSON.stringify(store));
+}
+
+/** Robust fetch: SPA fallback may serve index.html for missing assets. Detect HTML and reject. */
 async function fetchLibraryText(url: string): Promise<string> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Library fetch failed: ${res.status}`);
   const text = await res.text();
   const trimmed = text.trimStart();
-  if (trimmed.startsWith("<!DOCTYPE html") || trimmed.startsWith("<html")) {
+  if (trimmed.startsWith("<!doctype html") || trimmed.startsWith("<!DOCTYPE html") || trimmed.startsWith("<html")) {
     throw new Error("Library fetch returned HTML (check public/library/perfect-hour-data.txt)");
   }
   return text;
@@ -239,12 +259,10 @@ function stableIdFrom(title: string, levelKey: LevelKey) {
     h ^= base.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  // unsigned
   return `${levelKey}_${(h >>> 0).toString(16)}`;
 }
 
 function parseSessionBlock(block: string): Session | null {
-  // Simple line-oriented parse; tolerant of missing fields.
   const lines = block.replace(/\r\n/g, "\n").split("\n");
 
   const getField = (prefix: string) => {
@@ -258,7 +276,6 @@ function parseSessionBlock(block: string): Session | null {
   const levelRaw = getField("Level:");
   const levelKey = parseLevelKey(levelRaw) || "A2";
 
-  // Parse twists
   const twists: string[] = [];
   const twistsStart = lines.findIndex((l) => l.trim() === "Twists:");
   if (twistsStart >= 0) {
@@ -272,13 +289,11 @@ function parseSessionBlock(block: string): Session | null {
     }
   }
 
-  // Parse phases
   const phases: Phase[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i].trim();
     if (/^PHASE\s+\d+/i.test(line)) {
-      // scan until next PHASE or END
       let name = "";
       let minutes = 0;
       let purpose = "";
@@ -286,10 +301,9 @@ function parseSessionBlock(block: string): Session | null {
       let aiScript = "";
       i++;
       for (; i < lines.length; i++) {
-        const l = lines[i];
-        const t = l.trim();
+        const t = lines[i].trim();
         if (/^PHASE\s+\d+/i.test(t) || t === "END PERFECT HOUR SESSION") {
-          i--; // let outer loop re-handle
+          i--;
           break;
         }
         if (t.startsWith("Name:")) name = t.slice("Name:".length).trim();
@@ -298,12 +312,11 @@ function parseSessionBlock(block: string): Session | null {
           minutes = Number.isFinite(n) ? n : minutes;
         } else if (t.startsWith("Purpose:")) purpose = t.slice("Purpose:".length).trim();
         else if (t === "Human steps:" || t === "Human steps") {
-          // collect bullet lines until AI helper script or blank line that ends bullets
           for (i = i + 1; i < lines.length; i++) {
             const bl = lines[i].trim();
             if (!bl) continue;
             if (bl.startsWith("AI helper script:") || bl.startsWith("AI helper script")) {
-              i--; // let next section handle
+              i--;
               break;
             }
             if (bl.startsWith("*")) humanSteps.push(bl.replace(/^\*\s*/, "").trim());
@@ -315,7 +328,6 @@ function parseSessionBlock(block: string): Session | null {
           }
         } else if (t.startsWith("AI helper script:")) {
           aiScript = t.slice("AI helper script:".length).trim();
-          // allow multi-line script until blank or next section
           for (i = i + 1; i < lines.length; i++) {
             const nl = lines[i].trim();
             if (!nl) continue;
@@ -323,8 +335,12 @@ function parseSessionBlock(block: string): Session | null {
               i--;
               break;
             }
-            // stop if a clear new field begins
-            if (nl.startsWith("Name:") || nl.startsWith("Minutes:") || nl.startsWith("Purpose:") || nl === "Human steps:") {
+            if (
+              nl.startsWith("Name:") ||
+              nl.startsWith("Minutes:") ||
+              nl.startsWith("Purpose:") ||
+              nl === "Human steps:"
+            ) {
               i--;
               break;
             }
@@ -343,8 +359,7 @@ function parseSessionBlock(block: string): Session | null {
     i++;
   }
 
-  // Minimum viability: must have markers and title
-  const s: Session = {
+  return {
     id: (idRaw && idRaw.trim()) || stableIdFrom(title, levelKey),
     title,
     levelKey,
@@ -357,12 +372,9 @@ function parseSessionBlock(block: string): Session | null {
     phases: phases.length ? phases : [{ name: "Session", minutes: 60, purpose: "Practice", humanSteps: [] }],
     _raw: block,
   };
-
-  return s;
 }
 
 function sortSessionsForPath(list: Session[]) {
-  // Stable, human-friendly ordering
   return [...list].sort((a, b) => a.title.localeCompare(b.title));
 }
 
@@ -371,8 +383,11 @@ function pickRandomWithVariety(list: Session[], recent: string[], maxRecent = 6)
   const recentSet = new Set(recent.slice(-maxRecent));
   const candidates = list.filter((s) => !recentSet.has(s.id));
   const pool = candidates.length ? candidates : list;
-  const chosen = pool[Math.floor(Math.random() * pool.length)];
-  return chosen;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function msInDays(days: number) {
+  return days * 24 * 60 * 60 * 1000;
 }
 
 function Card(props: { title?: string; children: React.ReactNode; right?: React.ReactNode; subtle?: boolean; style?: React.CSSProperties }) {
@@ -392,13 +407,7 @@ function Card(props: { title?: string; children: React.ReactNode; right?: React.
     >
       {(title || right) && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-          {title ? (
-            <div style={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
-              {title}
-            </div>
-          ) : (
-            <div />
-          )}
+          {title ? <div style={{ fontWeight: 700, letterSpacing: "-0.01em" }}>{title}</div> : <div />}
           {right}
         </div>
       )}
@@ -417,8 +426,7 @@ function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { 
         padding: "14px 16px",
         borderRadius: "var(--radius)",
         border: "1px solid rgba(37,99,235,0.22)",
-        background:
-          "linear-gradient(180deg, rgba(37,99,235,0.14), rgba(37,99,235,0.08))",
+        background: "linear-gradient(180deg, rgba(37,99,235,0.14), rgba(37,99,235,0.08))",
         boxShadow: "var(--shadow)",
         color: "var(--text)",
         fontWeight: 800,
@@ -444,6 +452,29 @@ function SoftButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { chi
         boxShadow: "var(--shadow-sm)",
         color: "var(--text)",
         fontWeight: 700,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SmallButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { children: React.ReactNode; tone?: "primary" | "neutral" }) {
+  const { children, tone = "neutral", style, ...rest } = props;
+  const primary = tone === "primary";
+  return (
+    <button
+      {...rest}
+      style={{
+        padding: "8px 10px",
+        borderRadius: 999,
+        border: primary ? "1px solid rgba(37,99,235,0.28)" : "1px solid rgba(15,23,42,0.12)",
+        background: primary ? "rgba(37,99,235,0.10)" : "rgba(255,255,255,0.74)",
+        boxShadow: "var(--shadow-sm)",
+        color: "var(--text)",
+        fontWeight: 800,
+        fontSize: 13,
         ...style,
       }}
     >
@@ -482,9 +513,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   static getDerivedStateFromError(err: any) {
     return { hasError: true, message: String(err?.message || err) };
   }
-  componentDidCatch() {
-    // no-op: keep it quiet in production
-  }
+  componentDidCatch() {}
   render() {
     if (this.state.hasError) {
       return (
@@ -525,7 +554,7 @@ function ModalSheet(props: { open: boolean; onClose: () => void; title: string; 
     >
       <div
         style={{
-          width: "min(520px, 92vw)",
+          width: "min(560px, 92vw)",
           height: "100%",
           background: "rgba(255,255,255,0.86)",
           borderLeft: "1px solid rgba(15,23,42,0.10)",
@@ -537,7 +566,7 @@ function ModalSheet(props: { open: boolean; onClose: () => void; title: string; 
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-          <div style={{ fontWeight: 900, letterSpacing: "-0.02em" }}>{title}</div>
+          <div style={{ fontWeight: 950, letterSpacing: "-0.02em" }}>{title}</div>
           <SoftButton onClick={onClose} aria-label="Close">
             Close
           </SoftButton>
@@ -561,10 +590,10 @@ function MenuButton(props: { label: string; value: string; onClick: () => void }
         display: "inline-flex",
         alignItems: "center",
         gap: 10,
-        fontWeight: 800,
+        fontWeight: 850,
       }}
     >
-      <span style={{ color: "rgba(15,23,42,0.70)", fontWeight: 800 }}>{props.label}</span>
+      <span style={{ color: "rgba(15,23,42,0.70)", fontWeight: 900 }}>{props.label}</span>
       <span>{props.value}</span>
       <span style={{ color: "rgba(15,23,42,0.55)", marginLeft: 4 }}>▾</span>
     </button>
@@ -590,7 +619,7 @@ function MenuList<T extends string>(props: { title: string; options: { value: T;
                 boxShadow: "var(--shadow-sm)",
               }}
             >
-              <div style={{ fontWeight: 850 }}>{o.label}</div>
+              <div style={{ fontWeight: 900 }}>{o.label}</div>
               {o.sub && <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{o.sub}</div>}
             </button>
           );
@@ -600,7 +629,6 @@ function MenuList<T extends string>(props: { title: string; options: { value: T;
   );
 }
 
-/** Import AI sessions: strict template + paste box */
 function buildAIPrompt(args: { level: LevelKey; category: FocusCategory; context: string }) {
   const { level, category, context } = args;
   const contextLine = context.trim() ? `\nUser context: ${context.trim()}\n` : "\n";
@@ -610,7 +638,7 @@ function buildAIPrompt(args: { level: LevelKey; category: FocusCategory; context
     "Output EXACTLY one session in this format (no markdown, no extra commentary):",
     "",
     "BEGIN PERFECT HOUR SESSION",
-    `Title: <short action title>`,
+    "Title: <short action title>",
     `Level: ${level} (ACTFL + CLB text optional)`,
     "Partner: Human or AI",
     "Goal (CLB): <one can-do sentence>",
@@ -663,15 +691,42 @@ function buildAIPrompt(args: { level: LevelKey; category: FocusCategory; context
   ].join("\n");
 }
 
+function downloadTextFile(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function computeNextSessionForLevel(list: Session[], completed: Record<string, true>) {
+  if (!list.length) return null;
+  const sorted = sortSessionsForPath(list);
+  return sorted.find((s) => !completed[s.id]) || sorted[0];
+}
+
+function nextLevelWithContent(current: LevelKey, byLevel: Record<LevelKey, Session[]>) {
+  const order: LevelKey[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
+  const idx = order.indexOf(current);
+  for (let i = idx; i < order.length; i++) {
+    if ((byLevel[order[i]] || []).length > 0) return order[i];
+  }
+  for (let i = 0; i < idx; i++) {
+    if ((byLevel[order[i]] || []).length > 0) return order[i];
+  }
+  return current;
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("HOME");
-  const [state, setState] = useState<ProgressState>(() => loadState());
 
-  // Brand the browser tab
-  useEffect(() => {
-    document.title = APP_NAME;
-  }, []);
-
+  const [store, setStore] = useState<ProfilesStore>(() => loadStore());
+  const activeProfile = useMemo(() => store.profiles.find((p) => p.id === store.activeId) || store.profiles[0], [store]);
+  const progress = activeProfile.progress;
 
   const [libraryText, setLibraryText] = useState<string>("");
   const [libraryError, setLibraryError] = useState<string | null>(null);
@@ -684,14 +739,13 @@ export default function App() {
     return map;
   }, [sessions]);
 
-  // Menu sheets
   const [openLevelMenu, setOpenLevelMenu] = useState(false);
   const [openModeMenu, setOpenModeMenu] = useState(false);
+  const [openLangMenu, setOpenLangMenu] = useState(false);
 
-  // Checklist sheet
   const [levelSheet, setLevelSheet] = useState<LevelKey | null>(null);
 
-  // Session runner
+  // Runner
   const [active, setActive] = useState<Session | null>(null);
   const [phaseIdx, setPhaseIdx] = useState<number>(0);
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
@@ -711,10 +765,15 @@ export default function App() {
   const [importPaste, setImportPaste] = useState<string>("");
   const [importMsg, setImportMsg] = useState<string>("");
 
-  // Persist state
+  // Persist store
   useEffect(() => {
-    saveState(state);
-  }, [state]);
+    saveStore(store);
+  }, [store]);
+
+  // Title for tab
+  useEffect(() => {
+    document.title = `${APP_NAME} — ${activeProfile.name}`;
+  }, [activeProfile.name]);
 
   // Load library once
   useEffect(() => {
@@ -738,17 +797,33 @@ export default function App() {
     };
   }, []);
 
-  // Parse sessions when text changes
+  // Parse sessions when base library or profile user library changes
   useEffect(() => {
-    if (!libraryText) return;
-    const blocks = extractBlocks(libraryText);
+    if (!libraryText && !activeProfile.userLibraryText) return;
+
+    const blocks = extractBlocks(libraryText || "");
+    const userBlocks = extractBlocks(activeProfile.userLibraryText || "");
+
     const parsed: Session[] = [];
     for (const b of blocks) {
       const s = parseSessionBlock(b);
       if (s) parsed.push(s);
     }
-    setSessions(parsed);
-  }, [libraryText]);
+    for (const b of userBlocks) {
+      const s = parseSessionBlock(b);
+      if (s) parsed.push(s);
+    }
+
+    // de-dupe by id (first wins)
+    const seen = new Set<string>();
+    const deduped: Session[] = [];
+    for (const s of parsed) {
+      if (seen.has(s.id)) continue;
+      seen.add(s.id);
+      deduped.push(s);
+    }
+    setSessions(deduped);
+  }, [libraryText, activeProfile.userLibraryText, activeProfile.id]);
 
   // Runner ticking
   useEffect(() => {
@@ -757,25 +832,29 @@ export default function App() {
         window.clearInterval(tickRef.current);
         tickRef.current = null;
       }
-      // when stopping, accrue time from runStartedAtRef
       if (runStartedAtRef.current != null) {
         const elapsed = nowMs() - runStartedAtRef.current;
         runStartedAtRef.current = null;
         if (elapsed > 0) {
-          setState((s) => ({ ...s, time: { ...s.time, totalMs: s.time.totalMs + elapsed } }));
+          setStore((st) => {
+            const next = { ...st };
+            next.profiles = next.profiles.map((p) => {
+              if (p.id !== st.activeId) return p;
+              return { ...p, progress: { ...p.progress, time: { ...p.progress.time, totalMs: p.progress.time.totalMs + elapsed } } };
+            });
+            return next;
+          });
         }
       }
       return;
     }
 
-    // starting
     if (runStartedAtRef.current == null) runStartedAtRef.current = nowMs();
 
     tickRef.current = window.setInterval(() => {
       setSecondsLeft((sec) => {
         if (sec <= 1) {
-          // phase ends: autopause
-          window.setTimeout(() => setRunning(false), 0);
+          window.setTimeout(() => setRunning(false), 0); // autopause at phase end
           return 0;
         }
         return sec - 1;
@@ -790,54 +869,40 @@ export default function App() {
     };
   }, [running]);
 
-  const currentLevelList = sessionsByLevel[state.level] || [];
-  const completedMap = state.completedIdsByLevel[state.level] || {};
+  const currentLevelList = sessionsByLevel[progress.level] || [];
+  const completedMap = progress.completedIdsByLevel[progress.level] || {};
   const completedCount = Object.keys(completedMap).length;
   const totalCount = currentLevelList.length;
 
-  const totalHours = formatHrs(state.time.totalMs);
-  const goalHours = Math.max(1, state.time.goalHours);
+  const totalHours = formatHrs(progress.time.totalMs);
+  const goalHours = Math.max(1, progress.time.goalHours);
   const totalPct = clamp(Math.round((totalHours / goalHours) * 100), 0, 100);
+
+  const needsBackup = (() => {
+    const nextAt = progress.nextBackupAtMs;
+    if (!nextAt) return true;
+    return nowMs() >= nextAt;
+  })();
 
   const levelCoverage = (lvl: LevelKey) => {
     const total = (sessionsByLevel[lvl] || []).length;
-    const done = Object.keys(state.completedIdsByLevel[lvl] || {}).length;
+    const done = Object.keys(progress.completedIdsByLevel[lvl] || {}).length;
     return { total, done, pct: percent(done, total) };
   };
 
-  const nextPathTarget = useMemo(() => {
-    const startAt = Math.max(0, LEVEL_ORDER.indexOf(state.level));
+  function updateProgress(mutator: (p: ProgressState) => ProgressState) {
+    setStore((st) => ({
+      ...st,
+      profiles: st.profiles.map((p) => (p.id === st.activeId ? { ...p, progress: mutator(p.progress) } : p)),
+    }));
+  }
 
-    for (let li = startAt; li < LEVEL_ORDER.length; li++) {
-      const lvl = LEVEL_ORDER[li];
-      const lvlList = sessionsByLevel[lvl] || [];
-      if (!lvlList.length) continue;
-
-      const sorted = sortSessionsForPath(lvlList);
-      const doneMap = state.completedIdsByLevel[lvl] || {};
-      const idxNext = sorted.findIndex((s) => !doneMap[s.id]);
-
-      if (idxNext >= 0) {
-        return {
-          level: lvl,
-          session: sorted[idxNext],
-          idxNext,
-          total: sorted.length,
-          done: sorted.length - sorted.filter((s) => !doneMap[s.id]).length,
-        };
-      }
-    }
-
-    // Fully complete: restart from first available level
-    for (const lvl of LEVEL_ORDER) {
-      const lvlList = sessionsByLevel[lvl] || [];
-      if (!lvlList.length) continue;
-      const sorted = sortSessionsForPath(lvlList);
-      return { level: lvl, session: sorted[0], idxNext: 0, total: sorted.length, done: 0 };
-    }
-
-    return null;
-  }, [state.level, sessionsByLevel, state.completedIdsByLevel]);
+  function updateActiveProfile(mutator: (p: Profile) => Profile) {
+    setStore((st) => ({
+      ...st,
+      profiles: st.profiles.map((p) => (p.id === st.activeId ? mutator(p) : p)),
+    }));
+  }
 
   function startSession(session: Session) {
     setActive(session);
@@ -853,46 +918,22 @@ export default function App() {
   }
 
   function chooseAndStart() {
-    const list = sessionsByLevel[state.level] || [];
+    const lvl = progress.level;
+    const list = sessionsByLevel[lvl] || [];
     if (!list.length) return;
-    if (state.mode === "path") {
-      // Journey path: continue through uncompleted sessions, then advance to the next level with content.
-      const startAt = Math.max(0, LEVEL_ORDER.indexOf(state.level));
-      for (let li = startAt; li < LEVEL_ORDER.length; li++) {
-        const lvl = LEVEL_ORDER[li];
-        const lvlList = sessionsByLevel[lvl] || [];
-        if (!lvlList.length) continue;
 
-        const sorted = sortSessionsForPath(lvlList);
-        const doneMap = state.completedIdsByLevel[lvl] || {};
-        const next = sorted.find((s) => !doneMap[s.id]);
-
-        if (next) {
-          if (lvl !== state.level) {
-            setState((s) => ({ ...s, level: lvl }));
-          }
-          startSession(next);
-          return;
-        }
-      }
-
-      // If everything is complete, restart from the first available level.
-      for (const lvl of LEVEL_ORDER) {
-        const lvlList = sessionsByLevel[lvl] || [];
-        if (!lvlList.length) continue;
-        if (lvl !== state.level) setState((s) => ({ ...s, level: lvl }));
-        startSession(sortSessionsForPath(lvlList)[0]);
-        return;
-      }
+    if (progress.mode === "path") {
+      const next = computeNextSessionForLevel(list, progress.completedIdsByLevel[lvl] || {});
+      if (next) startSession(next);
       return;
     }
-    // random
-    const recent = state.recentIdsByLevel[state.level] || [];
+
+    const recent = progress.recentIdsByLevel[lvl] || [];
     const chosen = pickRandomWithVariety(list, recent, 6) || list[0];
-    setState((s) => {
-      const prev = s.recentIdsByLevel[s.level] || [];
+    updateProgress((p) => {
+      const prev = p.recentIdsByLevel[lvl] || [];
       const nextRecent = [...prev, chosen.id].slice(-12);
-      return { ...s, recentIdsByLevel: { ...s.recentIdsByLevel, [s.level]: nextRecent } };
+      return { ...p, recentIdsByLevel: { ...p.recentIdsByLevel, [lvl]: nextRecent } };
     });
     startSession(chosen);
   }
@@ -912,15 +953,13 @@ export default function App() {
   }
 
   function skipToNext() {
-    // counts as done even if skipped
-    markPhaseDoneAndAdvance();
+    markPhaseDoneAndAdvance(); // counts as done even if skipped
   }
 
   function toggleRun() {
     if (!active) return;
     if (sessionEnded) return;
     if (!secondsLeft) {
-      // phase ended; advance
       markPhaseDoneAndAdvance();
       return;
     }
@@ -929,20 +968,32 @@ export default function App() {
 
   function markSessionComplete() {
     if (!active) return;
-    setState((s) => {
-      const lvl = active.levelKey;
-      const done = { ...(s.completedIdsByLevel[lvl] || {}) };
+    const lvl = active.levelKey;
+    updateProgress((p) => {
+      const done = { ...(p.completedIdsByLevel[lvl] || {}) };
       done[active.id] = true;
-      return { ...s, completedIdsByLevel: { ...s.completedIdsByLevel, [lvl]: done } };
+      return { ...p, completedIdsByLevel: { ...p.completedIdsByLevel, [lvl]: done } };
     });
+
+    // If path mode, auto-advance level when current level is fully complete
+    if (progress.mode === "path") {
+      const after = { ...(progress.completedIdsByLevel[lvl] || {}) };
+      after[active.id] = true;
+      const levelTotal = (sessionsByLevel[lvl] || []).length;
+      const levelDone = Object.keys(after).length;
+      if (levelTotal > 0 && levelDone >= levelTotal) {
+        const nextLvl = nextLevelWithContent(lvl, sessionsByLevel);
+        if (nextLvl !== lvl) updateProgress((p) => ({ ...p, level: nextLvl }));
+      }
+    }
   }
 
   function toggleComplete(lvl: LevelKey, id: string) {
-    setState((s) => {
-      const done = { ...(s.completedIdsByLevel[lvl] || {}) };
+    updateProgress((p) => {
+      const done = { ...(p.completedIdsByLevel[lvl] || {}) };
       if (done[id]) delete done[id];
       else done[id] = true;
-      return { ...s, completedIdsByLevel: { ...s.completedIdsByLevel, [lvl]: done } };
+      return { ...p, completedIdsByLevel: { ...p.completedIdsByLevel, [lvl]: done } };
     });
   }
 
@@ -958,20 +1009,92 @@ export default function App() {
       setImportMsg("I couldn’t find a valid BEGIN/END session block.");
       return;
     }
-    const parsed: Session[] = [];
-    for (const b of blocks) {
-      const s = parseSessionBlock(b);
-      if (s) parsed.push({ ...s, levelKey: importLevel, category: importCategory });
-    }
-    if (!parsed.length) {
-      setImportMsg("That block didn’t parse into a usable session.");
-      return;
-    }
-    // Append into in-memory library (local-only). For a true local library, you'd store these in localStorage.
-    setSessions((prev) => [...prev, ...parsed]);
+
+    // Store raw text blocks per-profile so multi-language works
+    updateActiveProfile((p) => ({
+      ...p,
+      userLibraryText: [p.userLibraryText || "", blocks.join("\n\n")].filter(Boolean).join("\n\n"),
+    }));
+
     setImportPaste("");
-    setImportMsg(`Imported ${parsed.length} session(s) into this device.`);
+    setImportMsg(`Imported ${blocks.length} session(s) into this device.`);
   }
+
+  function exportBackup() {
+    const payload: ProfilesStore = store;
+    downloadTextFile("fluenthour-backup.json", JSON.stringify(payload, null, 2));
+    updateProgress((p) => {
+      const t = nowMs();
+      return { ...p, lastBackupAtMs: t, nextBackupAtMs: t + msInDays(7) };
+    });
+  }
+
+  async function importBackupFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as ProfilesStore;
+      if (!parsed || !Array.isArray(parsed.profiles) || !parsed.profiles.length) throw new Error("Invalid backup file.");
+      setStore(() => parsed);
+    } catch (e: any) {
+      alert(String(e?.message || e));
+    }
+  }
+
+  function addLanguage() {
+    const name = prompt("Name your language profile (example: French, Arabic, Greek):");
+    if (!name) return;
+    const id = `p_${Math.random().toString(16).slice(2)}`;
+    const p: Profile = { id, name: name.trim(), progress: makeDefaultProgress(), userLibraryText: "" };
+    setStore((st) => ({ ...st, profiles: [...st.profiles, p], activeId: id }));
+  }
+
+  function renameLanguage(id: string) {
+    const current = store.profiles.find((p) => p.id === id);
+    if (!current) return;
+    const name = prompt("Rename language profile:", current.name);
+    if (!name) return;
+    setStore((st) => ({ ...st, profiles: st.profiles.map((p) => (p.id === id ? { ...p, name: name.trim() } : p)) }));
+  }
+
+  function deleteLanguage(id: string) {
+    if (store.profiles.length <= 1) return;
+    const target = store.profiles.find((p) => p.id === id);
+    if (!target) return;
+    if (!confirm(`Delete "${target.name}" from this device?`)) return;
+    setStore((st) => {
+      const remaining = st.profiles.filter((p) => p.id !== id);
+      const activeId = st.activeId === id ? remaining[0].id : st.activeId;
+      return { activeId, profiles: remaining };
+    });
+  }
+
+  const premiumMark = (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div
+        aria-hidden="true"
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 12,
+          background:
+            "radial-gradient(14px 14px at 30% 30%, rgba(255,255,255,0.85), rgba(255,255,255,0.0)), linear-gradient(180deg, rgba(37,99,235,0.95), rgba(37,99,235,0.55))",
+          boxShadow: "0 12px 30px rgba(37,99,235,0.22), 0 6px 16px rgba(15,23,42,0.10)",
+          border: "1px solid rgba(255,255,255,0.45)",
+          display: "grid",
+          placeItems: "center",
+          color: "white",
+          fontWeight: 950,
+          letterSpacing: "-0.06em",
+        }}
+      >
+        FH
+      </div>
+      <div>
+        <div style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
+      </div>
+    </div>
+  );
 
   const header = (
     <div
@@ -981,53 +1104,28 @@ export default function App() {
         zIndex: 10,
         padding: "14px 14px 10px",
         background:
-          "linear-gradient(180deg, rgba(37,99,235,0.16), rgba(255,255,255,0.35) 60%, rgba(255,255,255,0.0))",
+          "linear-gradient(180deg, rgba(37,99,235,0.18), rgba(255,255,255,0.40) 60%, rgba(255,255,255,0.0))",
         backdropFilter: "blur(14px)",
         WebkitBackdropFilter: "blur(14px)",
         borderBottom: "1px solid rgba(15,23,42,0.08)",
       }}
     >
       <div style={{ maxWidth: 980, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            aria-hidden
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 14,
-              background:
-                "radial-gradient(18px 18px at 30% 25%, rgba(255,255,255,0.55), transparent 60%), linear-gradient(135deg, rgba(37,99,235,0.95), rgba(15,23,42,0.92))",
-              boxShadow: "var(--shadow-sm)",
-              border: "1px solid rgba(255,255,255,0.25)",
-              display: "grid",
-              placeItems: "center",
-              color: "white",
-              fontWeight: 950,
-              letterSpacing: "-0.04em",
-            }}
-          >
-            FH
-          </div>
-          <div>
-            <div style={{ fontWeight: 950, letterSpacing: "-0.03em", fontSize: 18 }}>{APP_NAME}</div>
-            <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>{APP_SUBTITLE}</div>
-          </div>
-        </div>
+        {premiumMark}
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <MenuButton
-            label="Level"
-            value={LEVELS.find((l) => l.key === state.level)?.label || state.level}
-            onClick={() => setOpenLevelMenu(true)}
-          />
-          <MenuButton
-            label="Mode"
-            value={state.mode === "random" ? "Random" : "Path"}
-            onClick={() => setOpenModeMenu(true)}
-          />
+          <MenuButton label="Language" value={activeProfile.name} onClick={() => setOpenLangMenu(true)} />
+          <MenuButton label="Level" value={LEVELS.find((l) => l.key === progress.level)?.label || progress.level} onClick={() => setOpenLevelMenu(true)} />
+          <MenuButton label="Mode" value={progress.mode === "path" ? "Path" : "Random"} onClick={() => setOpenModeMenu(true)} />
         </div>
       </div>
     </div>
   );
+
+  const nextUp = useMemo(() => {
+    const list = sessionsByLevel[progress.level] || [];
+    const done = progress.completedIdsByLevel[progress.level] || {};
+    return computeNextSessionForLevel(list, done);
+  }, [sessionsByLevel, progress.level, progress.completedIdsByLevel]);
 
   const home = (
     <>
@@ -1046,45 +1144,38 @@ export default function App() {
               Total: <b style={{ color: "var(--text)" }}>{totalHours}</b> of <b style={{ color: "var(--text)" }}>{goalHours}</b> hours
             </div>
             <div style={{ color: "var(--muted)", fontSize: 12 }}>
-              Level {state.level}: <b style={{ color: "var(--text)" }}>{completedCount}</b> of <b style={{ color: "var(--text)" }}>{totalCount}</b> completed
+              Level {progress.level}: <b style={{ color: "var(--text)" }}>{completedCount}</b> of <b style={{ color: "var(--text)" }}>{totalCount}</b> completed
             </div>
           </div>
         </Card>
 
-        {state.mode === "path" && nextPathTarget && (
-          <Card title="Your path" subtle>
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-                <div style={{ fontWeight: 700 }}>
-                  Next up: <span style={{ color: "var(--muted)", fontWeight: 700 }}>{levelLabel(nextPathTarget.level)}</span>
-                </div>
-                <div style={{ color: "var(--muted)" }}>
-                  Lesson {nextPathTarget.idxNext + 1} of {nextPathTarget.total}
-                </div>
-              </div>
-              <div style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, lineHeight: 1.25 }}>
-                {nextPathTarget.session.title}
-              </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <SmallButton
-                  onClick={() => {
-                    setState((s) => ({ ...s, level: nextPathTarget.level }));
-                    setLevelSheet(nextPathTarget.level);
-                  }}
-                >
-                  View checklist
-                </SmallButton>
-                <Pill tone="info">Auto-advances levels</Pill>
-              </div>
-            </div>
+        {needsBackup && (
+          <Card title="Backup reminder" subtle right={<SmallButton tone="primary" onClick={exportBackup}>Export</SmallButton>}>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>Export a weekly backup so you never lose your progress.</div>
           </Card>
         )}
 
         <PrimaryButton onClick={chooseAndStart} disabled={loadingLibrary || !!libraryError || !currentLevelList.length}>
-          {state.mode === "path" ? "Continue my fluent hour" : "Start a random fluent hour"}
+          Start my fluent hour
         </PrimaryButton>
 
-        {(loadingLibrary || libraryError) && (
+        <Card title="Your path" right={<SmallButton onClick={() => setLevelSheet(progress.level)}>Checklist</SmallButton>}>
+          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8 }}>
+            {progress.mode === "path" ? "Continue in order. Mark complete at the end." : "Random practice inside your selected level."}
+          </div>
+          {nextUp ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 900 }}>{nextUp.title}</div>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                {nextUp.context || "Tap start to begin."}
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>No sessions found for this level.</div>
+          )}
+        </Card>
+
+        {(loadingLibrary || libraryError || !sessions.length) && (
           <Card title="Library status" subtle>
             {loadingLibrary && <div style={{ color: "var(--muted)" }}>Loading sessions…</div>}
             {!loadingLibrary && libraryError && (
@@ -1103,24 +1194,17 @@ export default function App() {
           </Card>
         )}
 
-        <Card
-          title="Levels"
-          right={
-            <SoftButton onClick={() => setLevelSheet(state.level)} disabled={!sessionsByLevel[state.level]?.length}>
-              Open checklist
-            </SoftButton>
-          }
-        >
+        <Card title="Levels" right={<SmallButton onClick={() => setLevelSheet(progress.level)}>Open</SmallButton>}>
           <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 10 }}>Tap a level to select it.</div>
           <div style={{ display: "grid", gap: 8 }}>
             {LEVELS.map((lvl) => {
               const cov = levelCoverage(lvl.key);
-              const selected = lvl.key === state.level;
+              const selected = lvl.key === progress.level;
               return (
                 <button
                   key={lvl.key}
                   onClick={() => {
-                    setState((s) => ({ ...s, level: lvl.key }));
+                    updateProgress((p) => ({ ...p, level: lvl.key }));
                     setLevelSheet(lvl.key);
                   }}
                   style={{
@@ -1142,7 +1226,18 @@ export default function App() {
                       {cov.done} of {cov.total} • {cov.pct}%
                     </div>
                   </div>
-                  <div style={{ width: 44, height: 44, borderRadius: 999, border: "1px solid rgba(15,23,42,0.10)", background: "rgba(255,255,255,0.70)", display: "grid", placeItems: "center", boxShadow: "var(--shadow-sm)" }}>
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 999,
+                      border: "1px solid rgba(15,23,42,0.10)",
+                      background: "rgba(255,255,255,0.70)",
+                      display: "grid",
+                      placeItems: "center",
+                      boxShadow: "var(--shadow-sm)",
+                    }}
+                  >
                     <span style={{ fontWeight: 900, color: "rgba(15,23,42,0.75)" }}>{cov.pct}%</span>
                   </div>
                 </button>
@@ -1159,21 +1254,15 @@ export default function App() {
             <div style={{ display: "grid", gap: 12 }}>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Partner</div>
-                  <select
-                    value={state.partner}
-                    onChange={(e) => setState((s) => ({ ...s, partner: (e.target.value as PartnerMode) || "human" }))}
-                  >
+                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Partner</div>
+                  <select value={progress.partner} onChange={(e) => updateProgress((p) => ({ ...p, partner: e.target.value as PartnerMode }))}>
                     <option value="human">Language helper</option>
                     <option value="ai">AI helper</option>
                   </select>
                 </label>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Focus category</div>
-                  <select
-                    value={state.focusCategory}
-                    onChange={(e) => setState((s) => ({ ...s, focusCategory: (e.target.value as FocusCategory) || "General" }))}
-                  >
+                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Focus category</div>
+                  <select value={progress.focusCategory} onChange={(e) => updateProgress((p) => ({ ...p, focusCategory: e.target.value as FocusCategory }))}>
                     {FOCUS_CATEGORIES.map((c) => (
                       <option key={c} value={c}>
                         {c}
@@ -1182,37 +1271,47 @@ export default function App() {
                   </select>
                 </label>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Goal hours</div>
+                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Goal hours</div>
                   <input
                     type="number"
                     min={1}
-                    value={state.time.goalHours}
-                    onChange={(e) => setState((s) => ({ ...s, time: { ...s.time, goalHours: clamp(parseInt(e.target.value || "300", 10) || 300, 1, 10000) } }))}
+                    value={progress.time.goalHours}
+                    onChange={(e) =>
+                      updateProgress((p) => ({
+                        ...p,
+                        time: { ...p.time, goalHours: clamp(parseInt(e.target.value || "300", 10) || 300, 1, 10000) },
+                      }))
+                    }
                     style={{ width: 140 }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 6 }}>
-                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Reset totals</div>
-                  <SoftButton
-                    onClick={() => {
-                      if (confirm("Reset your total hours and completion?")) setState(makeDefaultState());
-                    }}
-                  >
-                    Reset
-                  </SoftButton>
+                  <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Backup</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <SmallButton tone="primary" onClick={exportBackup}>Export</SmallButton>
+                    <label style={{ display: "inline-flex", alignItems: "center" }}>
+                      <input
+                        type="file"
+                        accept="application/json"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) importBackupFile(f);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <SmallButton>Import</SmallButton>
+                    </label>
+                  </div>
                 </label>
               </div>
 
-              <Card
-                title="Import a session"
-                subtle
-                right={<SoftButton onClick={() => setShowImport((v) => !v)}>{showImport ? "Hide" : "Show"}</SoftButton>}
-              >
+              <Card title="Import a session" subtle right={<SoftButton onClick={() => setShowImport((v) => !v)}>{showImport ? "Hide" : "Show"}</SoftButton>}>
                 {showImport ? (
                   <div style={{ display: "grid", gap: 10 }}>
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <label style={{ display: "grid", gap: 6 }}>
-                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Level</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Level</div>
                         <select value={importLevel} onChange={(e) => setImportLevel(e.target.value as LevelKey)}>
                           {LEVELS.map((l) => (
                             <option key={l.key} value={l.key}>
@@ -1222,7 +1321,7 @@ export default function App() {
                         </select>
                       </label>
                       <label style={{ display: "grid", gap: 6 }}>
-                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Category</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Category</div>
                         <select value={importCategory} onChange={(e) => setImportCategory(e.target.value as FocusCategory)}>
                           {FOCUS_CATEGORIES.map((c) => (
                             <option key={c} value={c}>
@@ -1234,26 +1333,27 @@ export default function App() {
                     </div>
 
                     <label style={{ display: "grid", gap: 6 }}>
-                      <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Optional context (one sentence)</div>
+                      <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Optional context (one sentence)</div>
                       <input value={importContext} onChange={(e) => setImportContext(e.target.value)} placeholder="Example: Istanbul street market, polite tone." />
                     </label>
 
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <SoftButton
+                      <SmallButton
+                        tone="primary"
                         onClick={() => {
                           const prompt = buildAIPrompt({ level: importLevel, category: importCategory, context: importContext });
                           navigator.clipboard.writeText(prompt);
-                          setImportMsg("AI prompt copied. Paste it into your AI and generate one session.");
+                          setImportMsg("AI prompt copied. Generate one session and paste it below.");
                         }}
                       >
                         Copy AI prompt
-                      </SoftButton>
-                      <SoftButton onClick={doImport}>Import from paste</SoftButton>
+                      </SmallButton>
+                      <SmallButton onClick={doImport}>Import from paste</SmallButton>
                       {importMsg && <span style={{ color: "var(--muted)", fontSize: 12, alignSelf: "center" }}>{importMsg}</span>}
                     </div>
 
                     <label style={{ display: "grid", gap: 6 }}>
-                      <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 800 }}>Paste AI output</div>
+                      <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 900 }}>Paste AI output</div>
                       <textarea value={importPaste} onChange={(e) => setImportPaste(e.target.value)} placeholder="Paste the full BEGIN/END session block here." />
                     </label>
                   </div>
@@ -1263,11 +1363,12 @@ export default function App() {
               </Card>
             </div>
           ) : (
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>Optional settings and import.</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>Optional settings, backup, and import.</div>
           )}
         </Card>
       </div>
 
+      {/* Level checklist sheet */}
       <ModalSheet
         open={!!levelSheet}
         onClose={() => setLevelSheet(null)}
@@ -1281,7 +1382,7 @@ export default function App() {
             <div style={{ display: "grid", gap: 8 }}>
               {(() => {
                 const list = sortSessionsForPath(sessionsByLevel[levelSheet] || []);
-                const doneMap = state.completedIdsByLevel[levelSheet] || {};
+                const doneMap = progress.completedIdsByLevel[levelSheet] || {};
                 const incomplete = list.filter((s) => !doneMap[s.id]);
                 const complete = list.filter((s) => !!doneMap[s.id]);
 
@@ -1313,16 +1414,15 @@ export default function App() {
                           background: done ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.8)",
                           display: "grid",
                           placeItems: "center",
-                          fontWeight: 900,
+                          fontWeight: 950,
                         }}
                       >
                         {done ? "✓" : ""}
                       </button>
                       <button
                         onClick={() => {
-                          setState((st) => ({ ...st, level: (levelSheet as LevelKey) }));
-                          setLevelSheet(null);
                           startSession(s);
+                          setLevelSheet(null);
                         }}
                         style={{
                           textAlign: "left",
@@ -1332,7 +1432,7 @@ export default function App() {
                           cursor: "pointer",
                         }}
                       >
-                        <div style={{ fontWeight: 900, lineHeight: 1.2 }}>{s.title}</div>
+                        <div style={{ fontWeight: 950, lineHeight: 1.2 }}>{s.title}</div>
                         <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>
                           {s.context ? s.context : "Tap to start"}
                         </div>
@@ -1346,12 +1446,10 @@ export default function App() {
                     {incomplete.map(renderRow)}
                     {complete.length > 0 && (
                       <details style={{ marginTop: 6 }}>
-                        <summary style={{ cursor: "pointer", color: "var(--muted)", fontWeight: 800 }}>
+                        <summary style={{ cursor: "pointer", color: "var(--muted)", fontWeight: 900 }}>
                           Completed ({complete.length})
                         </summary>
-                        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                          {complete.map(renderRow)}
-                        </div>
+                        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>{complete.map(renderRow)}</div>
                       </details>
                     )}
                   </>
@@ -1368,7 +1466,6 @@ export default function App() {
     const s = active;
     if (!s) return null;
     const phase = s.phases[phaseIdx];
-
     const mm = Math.floor(secondsLeft / 60);
     const ss = secondsLeft % 60;
     const timeStr = `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
@@ -1382,7 +1479,8 @@ export default function App() {
           right={
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <Pill>{s.levelKey}</Pill>
-              <Pill>{state.partner === "human" ? "Language helper" : "AI helper"}</Pill>
+              <Pill>{progress.partner === "human" ? "Language helper" : "AI helper"}</Pill>
+              <Pill>{activeProfile.name}</Pill>
             </div>
           }
         >
@@ -1391,13 +1489,14 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 40, fontWeight: 950, letterSpacing: "-0.04em" }}>{timeStr}</div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <SoftButton onClick={toggleRun}>
-                  {sessionEnded ? "Done" : running ? "Pause" : "Start"}
-                </SoftButton>
-                <SoftButton onClick={skipToNext} disabled={sessionEnded}>
-                  Skip to next
-                </SoftButton>
-                <SoftButton onClick={() => { setRunning(false); setScreen("HOME"); }}>
+                <SoftButton onClick={toggleRun}>{sessionEnded ? "Done" : running ? "Pause" : "Start"}</SoftButton>
+                <SoftButton onClick={skipToNext} disabled={sessionEnded}>Skip to next</SoftButton>
+                <SoftButton
+                  onClick={() => {
+                    setRunning(false);
+                    setScreen("HOME");
+                  }}
+                >
                   Exit
                 </SoftButton>
               </div>
@@ -1405,18 +1504,14 @@ export default function App() {
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {s.phases.map((p, idx) => (
-                <Pill key={idx}>
-                  {idx === phaseIdx ? <b>Now</b> : phaseDone[idx] ? "Done" : "Next"}: {p.minutes}m
-                </Pill>
+                <Pill key={idx}>{idx === phaseIdx ? <b>Now</b> : phaseDone[idx] ? "Done" : "Next"}: {p.minutes}m</Pill>
               ))}
             </div>
 
             {sessionEnded && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <SoftButton onClick={markSessionComplete}>Mark complete</SoftButton>
-                <span style={{ color: "var(--muted)", fontSize: 12 }}>
-                  Completion updates level coverage. Total hours always count.
-                </span>
+                <SmallButton tone="primary" onClick={markSessionComplete}>Mark complete</SmallButton>
+                <span style={{ color: "var(--muted)", fontSize: 12 }}>Completion updates your path. Total hours always count.</span>
               </div>
             )}
           </div>
@@ -1432,7 +1527,7 @@ export default function App() {
           <div style={{ display: "grid", gap: 8 }}>
             {(phase?.humanSteps?.length ? phase.humanSteps : ["Follow the helper’s lead and keep it simple."]).map((step, idx) => (
               <div key={idx} style={{ display: "flex", gap: 10 }}>
-                <div style={{ width: 20, height: 20, borderRadius: 6, border: "1px solid rgba(15,23,42,0.12)", background: "rgba(255,255,255,0.75)", display: "grid", placeItems: "center", fontWeight: 900 }}>
+                <div style={{ width: 20, height: 20, borderRadius: 6, border: "1px solid rgba(15,23,42,0.12)", background: "rgba(255,255,255,0.75)", display: "grid", placeItems: "center", fontWeight: 950 }}>
                   {idx + 1}
                 </div>
                 <div style={{ lineHeight: 1.35 }}>{step}</div>
@@ -1441,10 +1536,7 @@ export default function App() {
           </div>
         </Card>
 
-        <Card
-          title="Advanced"
-          right={<SoftButton onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? "Hide" : "Show"}</SoftButton>}
-        >
+        <Card title="Advanced" right={<SoftButton onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? "Hide" : "Show"}</SoftButton>}>
           {showAdvanced ? (
             <div style={{ display: "grid", gap: 12 }}>
               <Card title="Helper (shows when paused)" subtle>
@@ -1454,19 +1546,13 @@ export default function App() {
                   <div style={{ color: "var(--text)", lineHeight: 1.45 }}>
                     {phase?.aiScript ? phase.aiScript : "Coach the learner with short turns and gentle recasts."}
                     {s.correction && (
-                      <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
-                        Correction focus: {s.correction}
-                      </div>
+                      <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>Correction focus: {s.correction}</div>
                     )}
                   </div>
                 )}
               </Card>
 
-              <Card
-                title="Localize for your context"
-                subtle
-                right={<SoftButton onClick={() => setShowLocalize((v) => !v)}>{showLocalize ? "Hide" : "Show"}</SoftButton>}
-              >
+              <Card title="Localize for your context" subtle right={<SoftButton onClick={() => setShowLocalize((v) => !v)}>{showLocalize ? "Hide" : "Show"}</SoftButton>}>
                 {showLocalize ? (
                   <div style={{ color: "var(--muted)", lineHeight: 1.5 }}>
                     <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
@@ -1485,9 +1571,7 @@ export default function App() {
                 <Card title="Twists" subtle>
                   <div style={{ display: "grid", gap: 6 }}>
                     {s.twists.slice(0, 6).map((t, idx) => (
-                      <div key={idx} style={{ color: "var(--muted)" }}>
-                        • {t}
-                      </div>
+                      <div key={idx} style={{ color: "var(--muted)" }}>• {t}</div>
                     ))}
                   </div>
                 </Card>
@@ -1505,13 +1589,59 @@ export default function App() {
     <ErrorBoundary>
       {header}
 
+      {openLangMenu && (
+        <ModalSheet open={true} onClose={() => setOpenLangMenu(false)} title="Language profiles">
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>Each language tracks its own hours, completion, and imports.</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {store.profiles.map((p) => {
+                const active = p.id === store.activeId;
+                const hrs = formatHrs(p.progress.time.totalMs);
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 10,
+                      padding: 12,
+                      borderRadius: "var(--radius2)",
+                      border: active ? "1px solid rgba(37,99,235,0.30)" : "1px solid var(--border)",
+                      background: active ? "rgba(37,99,235,0.06)" : "rgba(255,255,255,0.74)",
+                      boxShadow: "var(--shadow-sm)",
+                      alignItems: "center",
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        setStore((st) => ({ ...st, activeId: p.id }));
+                        setOpenLangMenu(false);
+                      }}
+                      style={{ textAlign: "left", border: "none", background: "transparent", padding: 0, cursor: "pointer" }}
+                    >
+                      <div style={{ fontWeight: 950 }}>{p.name}</div>
+                      <div style={{ color: "var(--muted)", fontSize: 12 }}>{hrs} hours • Level {p.progress.level}</div>
+                    </button>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <SmallButton onClick={() => renameLanguage(p.id)}>Rename</SmallButton>
+                      <SmallButton onClick={() => deleteLanguage(p.id)} disabled={store.profiles.length <= 1}>Delete</SmallButton>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <SmallButton tone="primary" onClick={addLanguage}>Add language</SmallButton>
+          </div>
+        </ModalSheet>
+      )}
+
       {openLevelMenu && (
         <MenuList<LevelKey>
           title="Choose level"
-          value={state.level}
+          value={progress.level}
           onClose={() => setOpenLevelMenu(false)}
           onPick={(v) => {
-            setState((s) => ({ ...s, level: v }));
+            updateProgress((p) => ({ ...p, level: v }));
             setOpenLevelMenu(false);
           }}
           options={LEVELS.map((l) => ({ value: l.key, label: l.label }))}
@@ -1521,15 +1651,15 @@ export default function App() {
       {openModeMenu && (
         <MenuList<Mode>
           title="Choose mode"
-          value={state.mode}
+          value={progress.mode}
           onClose={() => setOpenModeMenu(false)}
           onPick={(v) => {
-            setState((s) => ({ ...s, mode: v }));
+            updateProgress((p) => ({ ...p, mode: v }));
             setOpenModeMenu(false);
           }}
           options={[
+            { value: "path", label: "Path", sub: "Continue in order and mark complete" },
             { value: "random", label: "Random", sub: "Variety practice inside your selected level" },
-            { value: "path", label: "Path", sub: "Continue through uncompleted sessions in your selected level" },
           ]}
         />
       )}
