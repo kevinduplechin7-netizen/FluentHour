@@ -4,8 +4,3 @@ publish = "dist"
 
 [build.environment]
 NODE_VERSION = "20"
-
-[dev]
-command = "npm run dev"
-targetPort = 5173
-framework = "vite"
