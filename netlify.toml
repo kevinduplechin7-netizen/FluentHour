@@ -1,0 +1,15 @@
+[build]
+  publish = "."
+  command = "echo Skipping build: prebuilt static files"
+
+# SPA fallback (so deep links work)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Cache hashed assets hard
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
