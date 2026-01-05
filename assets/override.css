@@ -1,0 +1,430 @@
+/*
+  FluentHour / Sentence Paths — UI-only overlay
+  - Loaded AFTER the hashed bundle CSS (read-only)
+  - Do not alter routes, logic, content, or compiled bundles.
+  - Goals: right-size typography + spacing, prevent horizontal scroll, premium glass surfaces
+*/
+
+:root {
+  --fh-maxw: 980px;
+  --fh-gap: 12px;
+  --fh-pad: 14px;
+  --fh-pad-sm: 10px;
+
+  --radius: 16px;
+  --radius2: 13px;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 1px rgba(15, 23, 42, 0.03);
+  --shadow: 0 16px 44px rgba(15, 23, 42, 0.10), 0 6px 14px rgba(15, 23, 42, 0.06);
+  --shadow-press: 0 10px 26px rgba(15, 23, 42, 0.12);
+
+  --card: rgba(255, 255, 255, 0.76);
+  --border-strong: rgba(15, 23, 42, 0.12);
+}
+
+html {
+  font-size: clamp(14px, 0.35vw + 13px, 16px);
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* Prevent subtle overflow from long tokens/paths in flex/grid layouts */
+#root,
+.fh-container,
+.fh-header,
+.fh-header-inner,
+.fh-header-top,
+.fh-header-controls,
+.fh-card,
+.fh-card-header,
+.fh-modal-panel {
+  min-width: 0;
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
+}
+
+/* Calm background orbs — low-cost, no JS, pointer-events none */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto;
+  width: 520px;
+  height: 520px;
+  border-radius: 999px;
+  filter: blur(52px);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  left: -180px;
+  top: -220px;
+  background: radial-gradient(circle at 30% 30%, rgba(37, 99, 235, 0.22), transparent 60%);
+}
+
+body::after {
+  right: -220px;
+  top: -240px;
+  background: radial-gradient(circle at 35% 35%, rgba(139, 92, 246, 0.18), transparent 62%);
+}
+
+/* Container rhythm */
+.fh-container {
+  max-width: var(--fh-maxw);
+  padding: var(--fh-pad);
+  gap: var(--fh-gap);
+}
+
+@media (max-width: 640px) {
+  .fh-container {
+    padding: var(--fh-pad-sm);
+    gap: 10px;
+  }
+}
+
+/* Header: tighter, safer wrapping */
+.fh-header {
+  padding: 12px 14px 9px;
+}
+
+/* Brand: make the header icon feel like a premium home shortcut (no layout changes) */
+.fh-brand {
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fh-brand:focus-visible {
+  outline: none;
+  border-radius: var(--radius2);
+  box-shadow: var(--ring);
+}
+
+@media (max-width: 640px) {
+  .fh-header {
+    padding: 10px 10px 8px;
+  }
+}
+
+.fh-progress-text {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* Cards: premium glass edges, consistent spacing */
+.fh-card {
+  padding: 13px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-strong);
+}
+
+.fh-card--subtle {
+  background: rgba(255, 255, 255, 0.70);
+}
+
+@media (max-width: 480px) {
+  .fh-card {
+    padding: 12px;
+  }
+}
+
+/* Buttons: comfortable hit area without “giant” */
+.fh-primary-button {
+  min-height: 48px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 480px) {
+  .fh-primary-button {
+    min-height: 52px;
+    padding: 14px;
+    font-size: 14px;
+  }
+}
+
+/* Wrap pills/buttons on small screens; avoid overflow */
+.fh-pill,
+.fh-menu-button {
+  white-space: normal;
+  max-width: 100%;
+  text-align: center;
+}
+
+.fh-pill {
+  line-height: 1.2;
+}
+
+/* Timer right-size */
+.fh-timer {
+  font-size: 36px;
+}
+
+@media (max-width: 480px) {
+  .fh-timer {
+    font-size: 30px;
+  }
+}
+
+/* Long helper strings */
+.fh-text-muted {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Modal width safety */
+.fh-modal-panel {
+  width: min(560px, 94vw);
+}
+
+@media (max-width: 480px) {
+  .fh-modal-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Focus rings (kept visible, contained) */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    filter: none;
+  }
+}
+
+/* -----------------------------
+   Phase tools (Copy / Companion / Help)
+   UI-only injected controls
+------------------------------ */
+
+.fh-phase-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius2);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.fh-phase-tools__left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.fh-phase-tools__right {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.70);
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .fh-phase-tools {
+    padding: 8px;
+  }
+  .fh-phase-tools__right {
+    width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.fh-phase-tools__btn,
+.fh-phase-tools__icon {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: rgba(15, 23, 42, 0.90);
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.fh-phase-tools__btn:hover,
+.fh-phase-tools__icon:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.fh-phase-tools__btn:active,
+.fh-phase-tools__icon:active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-press);
+}
+
+.fh-phase-tools__btn--primary {
+  background: rgba(255, 255, 255, 0.90);
+  box-shadow: var(--shadow-sm);
+}
+
+.fh-phase-tools__icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.fh-phase-tools__btn:focus-visible,
+.fh-phase-tools__icon:focus-visible {
+  outline: none;
+  box-shadow: var(--ring), 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+/* Help modal */
+.fh-phase-help-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.34);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 9999;
+}
+
+.fh-phase-help {
+  width: min(620px, 94vw);
+  max-height: min(78vh, 640px);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.30);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.fh-phase-help__hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.fh-phase-help__title {
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.92);
+  letter-spacing: -0.01em;
+}
+
+.fh-phase-help__close {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  color: rgba(15, 23, 42, 0.92);
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.fh-phase-help__close:hover {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.fh-phase-help__close:active {
+  transform: translateY(1px);
+}
+
+.fh-phase-help__close:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.fh-phase-help__body {
+  padding: 12px 14px 16px;
+  color: rgba(15, 23, 42, 0.86);
+}
+
+.fh-phase-help__body p {
+  margin: 8px 0;
+}
+
+.fh-phase-help__howto {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.fh-phase-help__howtoTitle {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.fh-phase-help__howto ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.fh-phase-help__note {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: rgba(15, 23, 42, 0.74);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fh-phase-tools__btn,
+  .fh-phase-tools__icon,
+  .fh-phase-help__close {
+    transition: none;
+  }
+}
