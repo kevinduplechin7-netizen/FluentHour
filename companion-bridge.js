@@ -12,10 +12,12 @@
 */
 
 (() => {
-  const GPT_URL = "https://chatgpt.com/g/g-6958040e8ce881918400c643c84bbfc1-fluenthour-companion";
+  const COMPANION_GPT_URL = "https://chatgpt.com/g/g-6958040e8ce881918400c643c84bbfc1-fluenthour-companion";
+  const PHASE_ACTOR_GPT_URL = "https://chatgpt.com/g/g-695ca3f3a694819187975bb509bc15cb-fluent-hour-phase-actor";
   const STORAGE_KEY = "fluenthour.profiles.v1";
   const DEFAULT_LIBRARY_PATH = "/library/perfect-hour-data.txt";
-  const INJECT_ID = "fh-companion-bridge";
+  const INJECT_ID_COMPANION = "fh-companion-bridge";
+  const INJECT_ID_ACTOR = "fh-phase-actor-bridge";
 
   if (window.__FH_COMPANION_BRIDGE__) return;
   window.__FH_COMPANION_BRIDGE__ = true;
@@ -394,7 +396,7 @@
 
     lines.push("");
     lines.push("(If needed) Companion GPT link:");
-    lines.push(GPT_URL);
+    lines.push(COMPANION_GPT_URL);
 
     return lines.join("\n").trim() + "\n";
   }
@@ -432,7 +434,7 @@
 
     lines.push("");
     lines.push("Companion GPT link:");
-    lines.push(GPT_URL);
+    lines.push(COMPANION_GPT_URL);
 
     return lines.join("\n").trim() + "\n";
   }
@@ -473,14 +475,14 @@
 
   function createBridgeCard() {
     const card = document.createElement("div");
-    card.id = INJECT_ID;
+    card.id = INJECT_ID_COMPANION;
     card.className = "fh-card fh-card--subtle";
 
     card.innerHTML = `
       <div class="fh-card-header">
         <div style="font-weight: 900; letter-spacing: -0.01em;">Send to FluentHour Companion</div>
         <div class="fh-button-group" style="justify-content:flex-end;">
-          <a class="fh-menu-button" href="${GPT_URL}" target="_blank" rel="noreferrer noopener">Open Companion GPT</a>
+          <a class="fh-menu-button" href="${COMPANION_GPT_URL}" target="_blank" rel="noreferrer noopener">Open Companion GPT</a>
         </div>
       </div>
 
@@ -501,6 +503,234 @@
 
     return card;
   }
+
+
+  // --- Phase Actor (additional destination) --------------------------------
+
+  function looksUnsetLanguage(name) {
+    const s = String(name || "").trim().toLowerCase();
+    return !s || s === "my language" || s === "my language (default)" || s === "default";
+  }
+
+  function numberToWordsEn(n) {
+    const num = Math.floor(Number(n));
+    if (!isFinite(num) || num < 0) return "";
+    const ones = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
+    const tens = ["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
+
+    function underHundred(x) {
+      if (x < 20) return ones[x];
+      const t = Math.floor(x / 10);
+      const r = x % 10;
+      return r ? `${tens[t]}-${ones[r]}` : tens[t];
+    }
+
+    function underThousand(x) {
+      if (x < 100) return underHundred(x);
+      const h = Math.floor(x / 100);
+      const r = x % 100;
+      if (!r) return `${ones[h]} hundred`;
+      return `${ones[h]} hundred ${underHundred(r)}`;
+    }
+
+    if (num < 1000) return underThousand(num);
+
+    const th = Math.floor(num / 1000);
+    const r = num % 1000;
+    if (!r) return `${underThousand(th)} thousand`;
+    return `${underThousand(th)} thousand ${underThousand(r)}`;
+  }
+
+  function minutesToWordsEn(minutes) {
+    const w = numberToWordsEn(minutes);
+    return w ? `${w} minutes` : "minutes";
+  }
+
+  function buildActorPhasePrompt(session, phase, meta) {
+    const lines = [];
+
+    const targetLanguage = looksUnsetLanguage(meta?.profileName) ? "" : String(meta?.profileName || "").trim();
+
+    lines.push("Fluent Hour — paste into Fluent Hour Phase Actor");
+    lines.push("");
+    lines.push("ROLE");
+    lines.push("- You are the helper. Run this phase as a live conversation.");
+    lines.push("- Speak only in the target language.");
+    lines.push("- If the target language is unclear, ask me which target language to use, then wait.");
+    lines.push("- Keep learner speech level-appropriate but natural and correct.");
+    lines.push("- Helper speech must be native, correct, and clear (not slangy).");
+    lines.push("- Do not use digits; write all numbers out as words in the target language.");
+    lines.push("");
+    lines.push("TARGET LANGUAGE");
+    lines.push(targetLanguage || "(not set — ask me which target language)");
+    lines.push("");
+    if (session?.title) lines.push(`Session: ${session.title}`);
+    if (session?.levelKey || meta?.levelKey) lines.push(`Level: ${session.levelKey || meta.levelKey}`);
+    if (meta?.partner) lines.push(`Helper mode: ${meta.partner}`);
+    if (session?.goal) lines.push(`Goal: ${session.goal}`);
+    if (session?.context) lines.push(`Context: ${session.context}`);
+    if (session?.correction) lines.push(`Correction focus: ${session.correction}`);
+    lines.push("");
+
+    if (phase) {
+      lines.push("PHASE TO RUN");
+      lines.push(`Name: ${phase.name}`);
+      lines.push(`Duration: ${minutesToWordsEn(phase.minutes)}`);
+      if (phase.purpose) lines.push(`Purpose: ${phase.purpose}`);
+      if (Array.isArray(phase.humanSteps) && phase.humanSteps.length) {
+        lines.push("");
+        lines.push("Human steps:");
+        for (const s of phase.humanSteps) lines.push(`- ${s}`);
+      }
+      if (phase.aiScript) {
+        lines.push("");
+        lines.push("AI helper script:");
+        lines.push(phase.aiScript);
+      }
+    }
+
+    lines.push("");
+    lines.push("Phase Actor GPT link:");
+    lines.push(PHASE_ACTOR_GPT_URL);
+
+    return lines.join("\n").trim() + "\n";
+  }
+
+  function buildActorSessionPrompt(session, meta) {
+    const lines = [];
+    const targetLanguage = looksUnsetLanguage(meta?.profileName) ? "" : String(meta?.profileName || "").trim();
+
+    lines.push("Fluent Hour — paste into Fluent Hour Phase Actor");
+    lines.push("");
+    lines.push("ROLE");
+    lines.push("- You are the helper. Run the session phase-by-phase as a live conversation.");
+    lines.push("- Speak only in the target language.");
+    lines.push("- If the target language is unclear, ask me which target language to use, then wait.");
+    lines.push("- Keep learner speech level-appropriate but natural and correct.");
+    lines.push("- Helper speech must be native, correct, and clear (not slangy).");
+    lines.push("- Do not use digits; write all numbers out as words in the target language.");
+    lines.push("");
+    lines.push("TARGET LANGUAGE");
+    lines.push(targetLanguage || "(not set — ask me which target language)");
+    lines.push("");
+    if (session?.title) lines.push(`Session: ${session.title}`);
+    if (session?.levelKey || meta?.levelKey) lines.push(`Level: ${session.levelKey || meta.levelKey}`);
+    if (meta?.partner) lines.push(`Helper mode: ${meta.partner}`);
+    if (session?.goal) lines.push(`Goal: ${session.goal}`);
+    if (session?.context) lines.push(`Context: ${session.context}`);
+    if (session?.correction) lines.push(`Correction focus: ${session.correction}`);
+
+    lines.push("");
+    lines.push("PHASES TO RUN:");
+
+    for (const p of session?.phases || []) {
+      lines.push("");
+      lines.push(`- Name: ${p.name}`);
+      lines.push(`  Duration: ${minutesToWordsEn(p.minutes)}`);
+      if (p.purpose) lines.push(`  Purpose: ${p.purpose}`);
+      if (Array.isArray(p.humanSteps) && p.humanSteps.length) {
+        lines.push("  Human steps:");
+        for (const s of p.humanSteps) lines.push(`  - ${s}`);
+      }
+      if (p.aiScript) {
+        lines.push("  AI helper script:");
+        const aiLines = String(p.aiScript).split("\n");
+        for (const al of aiLines) lines.push(`  ${al}`);
+      }
+    }
+
+    lines.push("");
+    lines.push("Phase Actor GPT link:");
+    lines.push(PHASE_ACTOR_GPT_URL);
+
+    return lines.join("\n").trim() + "\n";
+  }
+
+  function createActorBridgeCard() {
+    const card = document.createElement("div");
+    card.id = INJECT_ID_ACTOR;
+    card.className = "fh-card fh-card--subtle";
+
+    card.innerHTML = `
+      <div class="fh-card-header">
+        <div style="font-weight: 900; letter-spacing: -0.01em;">Send to Fluent Hour Phase Actor</div>
+        <div class="fh-button-group" style="justify-content:flex-end;">
+          <a class="fh-menu-button" href="${PHASE_ACTOR_GPT_URL}" target="_blank" rel="noreferrer noopener">Open Phase Actor GPT</a>
+        </div>
+      </div>
+
+      <div class="fh-text-muted" style="margin-bottom: 10px;">
+        Copy the current phase (or the whole session), open Phase Actor, paste, and press Enter.
+      </div>
+
+      <div class="fh-button-group" style="margin-bottom: 8px;">
+        <button class="fh-menu-button" type="button" data-action="actor-copy-phase">Copy this phase</button>
+        <button class="fh-menu-button" type="button" data-action="actor-copy-session">Copy whole session</button>
+        <button class="fh-menu-button" type="button" data-action="actor-copy-open">Copy + Open</button>
+      </div>
+
+      <div class="fh-text-muted">
+        Tip: if you want the AI helper script visible on-screen, pause first (then open <b>Advanced</b> → <b>Helper</b>). Copying still includes the script when it exists in the library.
+      </div>
+    `.trim();
+
+    return card;
+  }
+
+  async function handleActorAction(action, container, btn) {
+    const meta = getSessionDomMeta(container);
+
+    if (!meta || !meta.title) {
+      toast("Couldn’t detect the current session. Open a session first.");
+      return;
+    }
+
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Working…";
+
+    try {
+      const { session, phase } = await resolveCurrentSessionAndPhase(meta);
+
+      if (!session) {
+        const learnerCard = Array.from(container.querySelectorAll(":scope > .fh-card"))
+          .find((c) => (c.querySelector(".fh-card-header > div")?.textContent || "").trim() === "Learner");
+
+        const visible = learnerCard ? learnerCard.innerText : container.innerText;
+        const payload = `Fluent Hour — paste into Fluent Hour Phase Actor\n\n${visible}\n\n${PHASE_ACTOR_GPT_URL}\n`;
+
+        const ok = await copyToClipboard(payload);
+        toast(ok ? "Copied (visible text)." : "Copy failed — select text and press Ctrl+C.");
+
+        if (action === "actor-copy-open") {
+          window.open(PHASE_ACTOR_GPT_URL, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+
+      let payload = "";
+      if (action === "actor-copy-session") {
+        payload = buildActorSessionPrompt(session, meta);
+      } else {
+        payload = buildActorPhasePrompt(session, phase, meta);
+      }
+
+      const ok = await copyToClipboard(payload);
+      toast(ok ? "Copied to clipboard." : "Copy failed — try again (or press Ctrl+C).");
+
+      if (action === "actor-copy-open") {
+        window.open(PHASE_ACTOR_GPT_URL, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      toast("Something went wrong while preparing the copy text.");
+      // eslint-disable-next-line no-console
+      console.error("FH Phase Actor Bridge error:", err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
 
   async function handleAction(action, container, btn) {
     const meta = getSessionDomMeta(container);
@@ -523,13 +753,13 @@
           .find((c) => (c.querySelector(".fh-card-header > div")?.textContent || "").trim() === "Learner");
 
         const visible = learnerCard ? learnerCard.innerText : container.innerText;
-        const payload = `FluentHour — paste into FluentHour Companion GPT\n\n${visible}\n\n${GPT_URL}\n`;
+        const payload = `FluentHour — paste into FluentHour Companion GPT\n\n${visible}\n\n${COMPANION_GPT_URL}\n`;
 
         const ok = await copyToClipboard(payload);
         toast(ok ? "Copied (visible text)." : "Copy failed — select text and press Ctrl+C.");
 
         if (action === "copy-open") {
-          window.open(GPT_URL, "_blank", "noopener,noreferrer");
+          window.open(COMPANION_GPT_URL, "_blank", "noopener,noreferrer");
         }
         return;
       }
@@ -545,7 +775,7 @@
       toast(ok ? "Copied to clipboard." : "Copy failed — try again (or press Ctrl+C)." );
 
       if (action === "copy-open") {
-        window.open(GPT_URL, "_blank", "noopener,noreferrer");
+        window.open(COMPANION_GPT_URL, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
       toast("Something went wrong while preparing the copy text.");
@@ -557,34 +787,59 @@
     }
   }
 
-  function ensureInjected() {
+    function ensureInjected() {
     const container = document.querySelector(".fh-container");
     if (!isSessionScreen(container)) {
-      const existing = document.getElementById(INJECT_ID);
-      if (existing) existing.remove();
+      const existingCompanion = document.getElementById(INJECT_ID_COMPANION);
+      if (existingCompanion) existingCompanion.remove();
+      const existingActor = document.getElementById(INJECT_ID_ACTOR);
+      if (existingActor) existingActor.remove();
       return;
     }
 
-    if (document.getElementById(INJECT_ID)) return;
+    const hasCompanion = !!document.getElementById(INJECT_ID_COMPANION);
+    const hasActor = !!document.getElementById(INJECT_ID_ACTOR);
+    if (hasCompanion && hasActor) return;
 
     // Insert right after the top session header card
     const cards = Array.from(container.querySelectorAll(":scope > .fh-card"));
     if (!cards.length) return;
 
     const headerCard = cards[0];
-    const bridge = createBridgeCard();
+    let anchor = headerCard;
 
-    headerCard.insertAdjacentElement("afterend", bridge);
+    if (!hasCompanion) {
+      const bridge = createBridgeCard();
+      anchor.insertAdjacentElement("afterend", bridge);
+      anchor = bridge;
 
-    bridge.addEventListener("click", (e) => {
-      const target = e.target;
-      if (!(target instanceof HTMLElement)) return;
-      const btn = target.closest("button[data-action]");
-      if (!(btn instanceof HTMLButtonElement)) return;
-      const action = btn.getAttribute("data-action");
-      if (!action) return;
-      handleAction(action, container, btn);
-    });
+      bridge.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLElement)) return;
+        const btn = target.closest("button[data-action]");
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const action = btn.getAttribute("data-action");
+        if (!action) return;
+        handleAction(action, container, btn);
+      });
+    } else {
+      anchor = document.getElementById(INJECT_ID_COMPANION) || headerCard;
+    }
+
+    if (!hasActor) {
+      const actorBridge = createActorBridgeCard();
+      anchor.insertAdjacentElement("afterend", actorBridge);
+
+      actorBridge.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLElement)) return;
+        const btn = target.closest("button[data-action]");
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const action = btn.getAttribute("data-action");
+        if (!action) return;
+        handleActorAction(action, container, btn);
+      });
+    }
   }
 
   // Watch for client-side navigation / rerenders
